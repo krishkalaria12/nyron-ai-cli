@@ -1,7 +1,7 @@
 package main
 
-import "github.com/krishkalaria12/nyron-ai-cli/ai"
+import "github.com/krishkalaria12/nyron-ai-cli/tui"
 
 func main() {
-	ai.GeminiAPI()
+	tui.StartTUI()
 }

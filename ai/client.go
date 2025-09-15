@@ -32,18 +32,67 @@ func getClient() *genai.Client {
 	return client
 }
 
-func GeminiAPI() {
+func GeminiAPI(prompt string) (string, error) {
 	main_client := getClient()
 
 	stream := main_client.Models.GenerateContentStream(
 		context.Background(),
 		"gemini-2.5-flash",
-		genai.Text("Explain AI in simple terms"),
+		genai.Text(prompt),
 		nil,
 	)
 
-	for chunk, _ := range stream {
+	var response string
+	for chunk, err := range stream {
+		if err != nil {
+			return "", fmt.Errorf("error streaming response: %w", err)
+		}
 		part := chunk.Candidates[0].Content.Parts[0]
-		fmt.Print(part.Text)
+		response += part.Text
+	}
+
+	return response, nil
+}
+
+// StreamMessage represents a chunk of response or an error
+type StreamMessage struct {
+	Content string
+	Error   error
+	Done    bool
+}
+
+// GeminiStreamAPI streams the response in real-time through a channel
+func GeminiStreamAPI(prompt string, responseChan chan<- StreamMessage) {
+	defer close(responseChan)
+
+	main_client := getClient()
+
+	stream := main_client.Models.GenerateContentStream(
+		context.Background(),
+		"gemini-2.5-flash",
+		genai.Text(prompt),
+		nil,
+	)
+
+	for chunk, err := range stream {
+		if err != nil {
+			responseChan <- StreamMessage{
+				Error: fmt.Errorf("error streaming response: %w", err),
+				Done:  true,
+			}
+			return
+		}
+
+		part := chunk.Candidates[0].Content.Parts[0]
+		responseChan <- StreamMessage{
+			Content: part.Text,
+			Error:   nil,
+			Done:    false,
+		}
+	}
+
+	// Send done signal
+	responseChan <- StreamMessage{
+		Done: true,
 	}
 }
