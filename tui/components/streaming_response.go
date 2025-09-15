@@ -124,13 +124,13 @@ func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
 		case "up", "k":
-			m.viewport.LineUp(1)
+			m.viewport.ScrollUp(1)
 		case "down", "j":
-			m.viewport.LineDown(1)
+			m.viewport.ScrollDown(1)
 		case "pgup", "b":
-			m.viewport.HalfViewUp()
+			m.viewport.HalfPageUp()
 		case "pgdown", "f":
-			m.viewport.HalfViewDown()
+			m.viewport.HalfPageDown()
 		case "home", "g":
 			m.viewport.GotoTop()
 		case "end", "G":
