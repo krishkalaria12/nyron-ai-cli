@@ -10,11 +10,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/krishkalaria12/nyron-ai-cli/ai"
-	"github.com/muesli/reflow/wordwrap"
 )
 
 type streamingResponseModel struct {
 	content      string
+	rawContent   string // Store raw markdown for re-rendering on resize
 	loading      bool
 	ready        bool
 	viewport     viewport.Model
@@ -60,16 +60,24 @@ func NewStreamingResponseModel(prompt string) streamingResponseModel {
 	}
 }
 
-func (m *streamingResponseModel) wrapContent() string {
-	if m.width <= 0 {
+func (m *streamingResponseModel) renderContentWithCurrentWidth() string {
+	if m.rawContent == "" {
 		return m.content
 	}
-	// Leave some padding for the viewport
-	width := m.width - 4
-	if width < 10 {
-		width = 10
+
+	// Calculate appropriate width for markdown rendering
+	renderWidth := m.width - 4 // Leave padding for viewport borders
+	if renderWidth < 20 {
+		renderWidth = 20 // Minimum reasonable width
 	}
-	return wordwrap.String(m.content, width)
+
+	rendered, err := ai.RenderToTerminalWithWidth(m.rawContent, renderWidth)
+	if err != nil {
+		return m.rawContent
+	}
+
+	m.content = rendered
+	return m.content
 }
 
 func (m streamingResponseModel) Init() tea.Cmd {
@@ -98,13 +106,13 @@ func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width, msg.Height-verticalMarginHeight)
 			m.viewport.YPosition = headerHeight
-			m.viewport.SetContent(m.wrapContent())
+			m.viewport.SetContent(m.renderContentWithCurrentWidth())
 			m.ready = true
 		} else {
 			m.viewport.Width = msg.Width
 			m.viewport.Height = msg.Height - verticalMarginHeight
-			// Re-wrap content when viewport size changes
-			m.viewport.SetContent(m.wrapContent())
+			// Re-render content with new width when viewport size changes
+			m.viewport.SetContent(m.renderContentWithCurrentWidth())
 		}
 
 	case streamChunkMsg:
@@ -119,10 +127,24 @@ func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Append new content
-		m.content += msg.Content
+		// Store raw content for re-rendering on resize
+		m.rawContent += msg.Content
+
+		// Calculate appropriate width for markdown rendering
+		renderWidth := m.width - 4 // Leave padding for viewport borders
+		if renderWidth < 20 {
+			renderWidth = 20 // Minimum reasonable width
+		}
+
+		markdownRenderedMsg, err := ai.RenderToTerminalWithWidth(msg.Content, renderWidth)
+		if err != nil {
+			m.content += msg.Content
+		} else {
+			m.content += markdownRenderedMsg
+		}
+
 		if m.ready {
-			m.viewport.SetContent(m.wrapContent())
+			m.viewport.SetContent(m.content)
 			// Auto-scroll to bottom
 			m.viewport.GotoBottom()
 		}
