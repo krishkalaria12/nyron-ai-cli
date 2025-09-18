@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -22,7 +23,8 @@ type streamingResponseModel struct {
 	width        int
 	height       int
 	prompt       string
-	responseChan chan ai.StreamMessage
+	responseChan chan ai.StreamMessage // producer -> forwarder
+	forwardChan  chan ai.StreamMessage // forwarder -> tea loop
 	err          error
 }
 
@@ -57,10 +59,117 @@ func NewStreamingResponseModel(prompt string) streamingResponseModel {
 		loading:      true,
 		spinner:      s,
 		responseChan: make(chan ai.StreamMessage),
+		forwardChan:  make(chan ai.StreamMessage),
 	}
 }
 
+func startStreamCommand(prompt string, responseChan chan ai.StreamMessage, forwardChan chan ai.StreamMessage) tea.Cmd {
+	return func() tea.Msg {
+		go func() {
+			ai.GeminiStreamAPI(prompt, responseChan)
+		}()
+
+		go func() {
+			const (
+				maxBatchDelay = 50 * time.Millisecond // debounce time
+				maxBatchSize  = 1024                  // flush if buffer reaches this size
+			)
+
+			var b strings.Builder
+			timer := time.NewTimer(time.Hour)
+			timer.Stop()
+			pending := false
+
+			flush := func(done bool) {
+				if !pending && !done {
+					return
+				}
+				content := b.String()
+
+				forwardChan <- ai.StreamMessage{
+					Content: content,
+					Error:   nil,
+					Done:    done,
+				}
+
+				b.Reset()
+				pending = false
+			}
+
+			for {
+				select {
+				case ev, ok := <-responseChan:
+					if !ok {
+						flush(true)
+						close(forwardChan)
+						return
+					}
+					if ev.Error != nil {
+						forwardChan <- ai.StreamMessage{
+							Content: "",
+							Error:   ev.Error,
+							Done:    true,
+						}
+						close(forwardChan)
+						return
+					}
+
+					if ev.Content != "" {
+						b.WriteString(ev.Content)
+						pending = true
+					}
+
+					if b.Len() >= maxBatchSize {
+						flush(false)
+						if !timer.Stop() {
+							select {
+							case <-timer.C:
+							default:
+							}
+						}
+					} else if pending {
+						if !timer.Stop() {
+							select {
+							case <-timer.C:
+							default:
+							}
+						}
+						timer.Reset(maxBatchDelay)
+					}
+
+					if ev.Done {
+						flush(true)
+						close(forwardChan)
+						return
+					}
+
+				case <-timer.C:
+					flush(false)
+				}
+			}
+		}()
+
+		return startStreamMsg(prompt)
+	}
+}
+
+func waitForForwardMessage(forwardChan chan ai.StreamMessage) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-forwardChan
+		if !ok {
+			return streamChunkMsg(ai.StreamMessage{
+				Content: "",
+				Error:   nil,
+				Done:    true,
+			})
+		}
+		return streamChunkMsg(msg)
+	}
+}
+
+// renderContentWithCurrentWidth renders the accumulated rawContent using the ai/glamour renderer
 func (m *streamingResponseModel) renderContentWithCurrentWidth() string {
+	// If no raw markdown accumulated yet, return whatever content we have
 	if m.rawContent == "" {
 		return m.content
 	}
@@ -73,18 +182,21 @@ func (m *streamingResponseModel) renderContentWithCurrentWidth() string {
 
 	rendered, err := ai.RenderToTerminalWithWidth(m.rawContent, renderWidth)
 	if err != nil {
+		// Fallback: if glamour rendering fails, show raw markdown (so user still sees text)
 		return m.rawContent
 	}
 
+	// update cached content with rendered ANSI
 	m.content = rendered
 	return m.content
 }
 
 func (m streamingResponseModel) Init() tea.Cmd {
+	// Start spinner tick + start the streaming producer + forwarder
 	return tea.Batch(
 		m.spinner.Tick,
-		startStreamCommand(m.prompt, m.responseChan),
-		waitForStreamMessage(m.responseChan),
+		startStreamCommand(m.prompt, m.responseChan, m.forwardChan),
+		waitForForwardMessage(m.forwardChan), // wait for the first forwarded message
 	)
 }
 
@@ -116,41 +228,49 @@ func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case streamChunkMsg:
-		if msg.Error != nil {
-			m.err = msg.Error
+		// Convert incoming message to ai.StreamMessage semantics
+		in := ai.StreamMessage(msg)
+
+		// Error handling from producer
+		if in.Error != nil {
+			m.err = in.Error
 			m.loading = false
+			// ensure viewport displays error
+			if m.ready {
+				m.viewport.SetContent(fmt.Sprintf("Error: %v\n", in.Error))
+			}
 			return m, nil
 		}
 
-		if msg.Done {
+		// If Done, mark loading false and final-render accumulated content
+		if in.Done {
 			m.loading = false
+			// final render of accumulated content (in case any sanitization appended fences)
+			if m.rawContent != "" {
+				final := m.renderContentWithCurrentWidth()
+				if m.ready {
+					m.viewport.SetContent(final)
+					m.viewport.GotoBottom()
+				}
+			}
 			return m, nil
 		}
 
-		// Store raw content for re-rendering on resize
-		m.rawContent += msg.Content
+		// Append the incoming chunk to the raw content (accumulate)
+		m.rawContent += in.Content
 
-		// Calculate appropriate width for markdown rendering
-		renderWidth := m.width - 4 // Leave padding for viewport borders
-		if renderWidth < 20 {
-			renderWidth = 20 // Minimum reasonable width
-		}
+		// Render the accumulated markdown (prevents broken fences & flicker).
+		rendered := m.renderContentWithCurrentWidth()
 
-		markdownRenderedMsg, err := ai.RenderToTerminalWithWidth(msg.Content, renderWidth)
-		if err != nil {
-			m.content += msg.Content
-		} else {
-			m.content += markdownRenderedMsg
-		}
-
+		// Update viewport
 		if m.ready {
-			m.viewport.SetContent(m.content)
-			// Auto-scroll to bottom
+			m.viewport.SetContent(rendered)
+			// Auto-scroll to bottom for live updates
 			m.viewport.GotoBottom()
 		}
 
-		// Wait for next message
-		return m, waitForStreamMessage(m.responseChan)
+		// Schedule next wait for message
+		return m, waitForForwardMessage(m.forwardChan)
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -222,22 +342,7 @@ func (m streamingResponseModel) footerView() string {
 	return lipgloss.JoinHorizontal(lipgloss.Center, line, info)
 }
 
-// Commands
-func startStreamCommand(prompt string, responseChan chan ai.StreamMessage) tea.Cmd {
-	return func() tea.Msg {
-		// Start streaming in a goroutine
-		go ai.GeminiStreamAPI(prompt, responseChan)
-		return startStreamMsg(prompt)
-	}
-}
-
-func waitForStreamMessage(responseChan chan ai.StreamMessage) tea.Cmd {
-	return func() tea.Msg {
-		msg := <-responseChan
-		return streamChunkMsg(msg)
-	}
-}
-
+// Run helper remains the same
 func RunStreamingResponseModel(prompt string) {
 	p := tea.NewProgram(
 		NewStreamingResponseModel(prompt),
@@ -249,4 +354,12 @@ func RunStreamingResponseModel(prompt string) {
 		fmt.Println("Error running program:", err)
 		os.Exit(1)
 	}
+}
+
+// small helper
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

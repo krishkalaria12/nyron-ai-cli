@@ -1,43 +1,66 @@
+// ai/markdown_renderer.go
 package ai
 
 import (
-	"github.com/charmbracelet/glamour"
-)
+	"regexp"
+	"strings"
 
-var TerminalRenderer *glamour.TermRenderer
+	"github.com/charmbracelet/glamour"
+	"github.com/krishkalaria12/nyron-ai-cli/theme"
+)
 
 var GlamourOptions = []glamour.TermRendererOption{
 	glamour.WithAutoStyle(),
-	glamour.WithStylePath("dark"),
+	glamour.WithStyles(theme.MarkdownTheme()),
 	glamour.WithEmoji(),
-	glamour.WithChromaFormatter("terminal256"),
+	glamour.WithChromaFormatter("terminal16m"),
 	glamour.WithPreservedNewLines(),
 }
 
-func init() {
-	var err error
-	TerminalRenderer, err = glamour.NewTermRenderer(GlamourOptions...)
-	if err != nil {
-		panic(err)
-	}
-}
-
-func RenderToTerminal(markdown string) (string, error) {
-	return TerminalRenderer.Render(markdown)
-}
-
 func RenderToTerminalWithWidth(markdown string, width int) (string, error) {
-	if width <= 0 {
-		return TerminalRenderer.Render(markdown)
+	markdown = sanitizePartialMarkdown(markdown)
+	opts := append([]glamour.TermRendererOption{}, GlamourOptions...)
+	if width > 0 {
+		opts = append(opts, glamour.WithWordWrap(width))
 	}
-
-	options := append([]glamour.TermRendererOption{}, GlamourOptions...)
-	options = append(options, glamour.WithWordWrap(width))
-
-	renderer, err := glamour.NewTermRenderer(options...)
+	r, err := glamour.NewTermRenderer(opts...)
 	if err != nil {
 		return "", err
 	}
+	return r.Render(markdown)
+}
 
-	return renderer.Render(markdown)
+func sanitizePartialMarkdown(s string) string {
+	if s == "" {
+		return s
+	}
+
+	backtickFenceCount := countFenceOccurrences(s, "```")
+	tildeFenceCount := countFenceOccurrences(s, "~~~")
+
+	if backtickFenceCount%2 == 1 {
+		if !strings.HasSuffix(s, "\n") {
+			s += "\n"
+		}
+		s += "```"
+	}
+
+	if tildeFenceCount%2 == 1 {
+		if !strings.HasSuffix(s, "\n") {
+			s += "\n"
+		}
+		s += "~~~"
+	}
+
+	if strings.HasSuffix(strings.TrimRight(s, " \t\n\r"), "<") {
+		s += ">"
+	}
+
+	return s
+}
+
+func countFenceOccurrences(s, fence string) int {
+	pattern := regexp.MustCompile("(?m)^\\s*" + regexp.QuoteMeta(fence))
+	matches := pattern.FindAllStringIndex(s, -1)
+	return len(matches)
 }

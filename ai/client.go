@@ -7,20 +7,23 @@ import (
 	"sync"
 
 	"github.com/krishkalaria12/nyron-ai-cli/config"
+	"github.com/openai/openai-go/v2"
+	"github.com/openai/openai-go/v2/option"
 	"google.golang.org/genai"
 )
 
 var (
-	client *genai.Client
-	once   sync.Once
+	GeminiClient *genai.Client
+	OpenaiClient openai.Client
+	once         sync.Once
 )
 
-func getClient() *genai.Client {
+func getGeminiClient() *genai.Client {
 	once.Do(func() {
 		ctx := context.Background()
 		var err error
 
-		client, err = genai.NewClient(ctx, &genai.ClientConfig{
+		GeminiClient, err = genai.NewClient(ctx, &genai.ClientConfig{
 			APIKey: config.Config("GEMINI_API_KEY"),
 		})
 
@@ -29,29 +32,17 @@ func getClient() *genai.Client {
 		}
 	})
 
-	return client
+	return GeminiClient
 }
 
-func GeminiAPI(prompt string) (string, error) {
-	main_client := getClient()
+func getOpenaiClient() openai.Client {
+	once.Do(func() {
+		OpenaiClient = openai.NewClient(
+			option.WithAPIKey(config.Config("OPENAI_API_KEY")),
+		)
+	})
 
-	stream := main_client.Models.GenerateContentStream(
-		context.Background(),
-		"gemini-2.5-flash",
-		genai.Text(prompt),
-		nil,
-	)
-
-	var response string
-	for chunk, err := range stream {
-		if err != nil {
-			return "", fmt.Errorf("error streaming response: %w", err)
-		}
-		part := chunk.Candidates[0].Content.Parts[0]
-		response += part.Text
-	}
-
-	return response, nil
+	return OpenaiClient
 }
 
 // StreamMessage represents a chunk of response or an error
@@ -65,7 +56,7 @@ type StreamMessage struct {
 func GeminiStreamAPI(prompt string, responseChan chan<- StreamMessage) {
 	defer close(responseChan)
 
-	main_client := getClient()
+	main_client := getGeminiClient()
 
 	stream := main_client.Models.GenerateContentStream(
 		context.Background(),
@@ -89,6 +80,61 @@ func GeminiStreamAPI(prompt string, responseChan chan<- StreamMessage) {
 			Error:   nil,
 			Done:    false,
 		}
+	}
+
+	// Send done signal
+	responseChan <- StreamMessage{
+		Done: true,
+	}
+}
+
+// OpenAIStreamAPI streams the response in real-time through a channel
+func OpenAIStreamAPI(prompt string, responseChan chan<- StreamMessage) {
+	defer close(responseChan)
+
+	main_client := getOpenaiClient()
+
+	ctx := context.Background()
+
+	stream := main_client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.UserMessage(prompt),
+		},
+		Seed:  openai.Int(0),
+		Model: openai.ChatModelGPT5Mini,
+	})
+
+	acc := openai.ChatCompletionAccumulator{}
+
+	for stream.Next() {
+		chunk := stream.Current()
+		acc.AddChunk(chunk)
+
+		// Handle finished content
+		if content, ok := acc.JustFinishedContent(); ok {
+			responseChan <- StreamMessage{
+				Content: content,
+				Error:   nil,
+				Done:    false,
+			}
+		}
+
+		// Handle streaming chunks
+		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
+			responseChan <- StreamMessage{
+				Content: chunk.Choices[0].Delta.Content,
+				Error:   nil,
+				Done:    false,
+			}
+		}
+	}
+
+	if stream.Err() != nil {
+		responseChan <- StreamMessage{
+			Error: stream.Err(),
+			Done:  true,
+		}
+		return
 	}
 
 	// Send done signal
