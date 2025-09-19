@@ -6,12 +6,49 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/krishkalaria12/nyron-ai-cli/ai"
+	editor "github.com/krishkalaria12/nyron-ai-cli/tui/components/editor"
 )
+
+type focusState int
+
+const (
+	focusViewport focusState = iota
+	focusInput
+)
+
+type keyMap struct {
+	Tab   key.Binding
+	Up    key.Binding
+	Down  key.Binding
+	Enter key.Binding
+	Quit  key.Binding
+}
+
+func (k keyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Tab, k.Quit}
+}
+
+func (k keyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Up, k.Down},
+		{k.Tab, k.Enter, k.Quit},
+	}
+}
+
+var keys = keyMap{
+	Up:    key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "scroll up")),
+	Down:  key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "scroll down")),
+	Tab:   key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "switch focus")),
+	Enter: key.NewBinding(key.WithKeys("ctrl+enter"), key.WithHelp("ctrl+enter", "send message")),
+	Quit:  key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q/ctrl+c", "quit")),
+}
 
 type streamingResponseModel struct {
 	content      string
@@ -20,12 +57,17 @@ type streamingResponseModel struct {
 	ready        bool
 	viewport     viewport.Model
 	spinner      spinner.Model
+	input        editor.InputModel
+	keys         keyMap
+	focused      focusState
+	help         help.Model
 	width        int
 	height       int
 	prompt       string
 	responseChan chan ai.StreamMessage // producer -> forwarder
 	forwardChan  chan ai.StreamMessage // forwarder -> tea loop
 	err          error
+	isStreaming  bool // Track if we're currently streaming
 }
 
 // Messages
@@ -39,27 +81,29 @@ var (
 	titleStyle = func() lipgloss.Style {
 		b := lipgloss.RoundedBorder()
 		b.Right = "├"
-		return lipgloss.NewStyle().BorderStyle(b).Padding(0, 1)
-	}()
-
-	infoStyle = func() lipgloss.Style {
-		b := lipgloss.RoundedBorder()
-		b.Left = "┤"
-		return titleStyle.BorderStyle(b)
+		return lipgloss.NewStyle().BorderStyle(b).Padding(0, 1).MaxHeight(10)
 	}()
 )
 
-func NewStreamingResponseModel(prompt string) streamingResponseModel {
+func NewStreamingResponseModel() streamingResponseModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = loadingStyle
 
+	// Initialize input model with editor keymap
+	inputModel := editor.InitialInputModel()
+	inputModel.InputKeys = editor.DefaultEditorKeyMap()
+
 	return streamingResponseModel{
-		prompt:       prompt,
-		loading:      true,
+		loading:      false, // Don't start loading immediately
 		spinner:      s,
+		input:        inputModel, // Assign the input model
+		focused:      focusInput, // Start focused on input
+		keys:         keys,
+		help:         help.New(),
 		responseChan: make(chan ai.StreamMessage),
 		forwardChan:  make(chan ai.StreamMessage),
+		isStreaming:  false,
 	}
 }
 
@@ -192,12 +236,8 @@ func (m *streamingResponseModel) renderContentWithCurrentWidth() string {
 }
 
 func (m streamingResponseModel) Init() tea.Cmd {
-	// Start spinner tick + start the streaming producer + forwarder
-	return tea.Batch(
-		m.spinner.Tick,
-		startStreamCommand(m.prompt, m.responseChan, m.forwardChan),
-		waitForForwardMessage(m.forwardChan), // wait for the first forwarded message
-	)
+	// Initialize input focus
+	return m.input.Focus()
 }
 
 func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -214,6 +254,7 @@ func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.width = msg.Width
 		m.height = msg.Height
+		m.help.Width = m.width
 
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width, msg.Height-verticalMarginHeight)
@@ -227,6 +268,15 @@ func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.SetContent(m.renderContentWithCurrentWidth())
 		}
 
+	case startStreamMsg:
+		// Stream has started, begin loading
+		m.loading = true
+		m.isStreaming = true
+		return m, tea.Batch(
+			m.spinner.Tick,
+			waitForForwardMessage(m.forwardChan),
+		)
+
 	case streamChunkMsg:
 		// Convert incoming message to ai.StreamMessage semantics
 		in := ai.StreamMessage(msg)
@@ -235,16 +285,21 @@ func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if in.Error != nil {
 			m.err = in.Error
 			m.loading = false
+			m.isStreaming = false
 			// ensure viewport displays error
 			if m.ready {
 				m.viewport.SetContent(fmt.Sprintf("Error: %v\n", in.Error))
 			}
-			return m, nil
+			// Re-focus input for next query
+			m.focused = focusInput
+			cmd = m.input.Focus()
+			return m, cmd
 		}
 
 		// If Done, mark loading false and final-render accumulated content
 		if in.Done {
 			m.loading = false
+			m.isStreaming = false
 			// final render of accumulated content (in case any sanitization appended fences)
 			if m.rawContent != "" {
 				final := m.renderContentWithCurrentWidth()
@@ -253,7 +308,11 @@ func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewport.GotoBottom()
 				}
 			}
-			return m, nil
+
+			// Re-focus input for next query
+			m.focused = focusInput
+			cmd = m.input.Focus()
+			return m, cmd
 		}
 
 		// Append the incoming chunk to the raw content (accumulate)
@@ -273,21 +332,79 @@ func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForForwardMessage(m.forwardChan)
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c", "q", "esc":
+		switch {
+		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
-		case "up", "k":
-			m.viewport.ScrollUp(1)
-		case "down", "j":
-			m.viewport.ScrollDown(1)
-		case "pgup", "b":
-			m.viewport.HalfPageUp()
-		case "pgdown", "f":
-			m.viewport.HalfPageDown()
-		case "home", "g":
-			m.viewport.GotoTop()
-		case "end", "G":
-			m.viewport.GotoBottom()
+		case key.Matches(msg, m.keys.Tab):
+			if m.focused == focusInput {
+				m.focused = focusViewport
+				m.input.Blur()
+			} else {
+				m.focused = focusInput
+				cmd = m.input.Focus()
+				cmds = append(cmds, cmd)
+			}
+		}
+
+		// Handle focus-specific key events
+		switch m.focused {
+		case focusInput:
+			// Check for send message key (Enter) press on the input.
+			if key.Matches(msg, m.input.InputKeys.SendMessage) {
+				inputValue := strings.TrimSpace(m.input.Value())
+				if inputValue == "" {
+					// Don't send empty messages
+					return m, nil
+				}
+
+				// Don't start new stream if already streaming
+				if m.isStreaming {
+					return m, nil
+				}
+
+				// Store the prompt and clear input
+				m.prompt = inputValue
+				m.input.Reset()
+
+				// Blur the input and switch focus to viewport during streaming
+				m.input.Blur()
+				m.focused = focusViewport
+
+				// Add the user's message to the viewport
+				userMessage := fmt.Sprintf("\n**You:** %s\n\n**AI:** ", inputValue)
+				currentContent := ""
+				if m.ready {
+					currentContent = m.viewport.View()
+				}
+				newContent := currentContent + userMessage
+
+				// Clear previous response content and set new content
+				m.rawContent = ""
+				m.content = ""
+
+				if m.ready {
+					m.viewport.SetContent(newContent)
+					m.viewport.GotoBottom()
+				}
+
+				// Create new channels for this stream
+				m.responseChan = make(chan ai.StreamMessage)
+				m.forwardChan = make(chan ai.StreamMessage)
+
+				// Start the streaming command
+				return m, startStreamCommand(m.prompt, m.responseChan, m.forwardChan)
+			} else if key.Matches(msg, m.input.InputKeys.Newline) {
+				// Handle newline explicitly
+				m.input.TextArea, cmd = m.input.TextArea.Update(msg)
+				cmds = append(cmds, cmd)
+			} else {
+				m.input.TextArea, cmd = m.input.TextArea.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+
+		case focusViewport:
+			m.viewport, cmd = m.viewport.Update(msg)
+			cmds = append(cmds, cmd)
 		}
 
 	case spinner.TickMsg:
@@ -297,8 +414,8 @@ func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Handle keyboard and mouse events in the viewport
-	if m.ready {
+	// Handle keyboard and mouse events in the viewport (for non-key messages)
+	if m.ready && m.focused == focusViewport {
 		m.viewport, cmd = m.viewport.Update(msg)
 		cmds = append(cmds, cmd)
 	}
@@ -315,37 +432,56 @@ func (m streamingResponseModel) View() string {
 		return fmt.Sprintf("Error: %v\nPress q to quit.", m.err)
 	}
 
-	return fmt.Sprintf("%s\n%s\n%s", m.headerView(), m.viewport.View(), m.footerView())
+	var viewportStyle lipgloss.Style
+	if m.focused == focusViewport {
+		viewportStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("63"))
+	} else {
+		viewportStyle = lipgloss.NewStyle().Border(lipgloss.HiddenBorder())
+	}
+	m.viewport.Style = viewportStyle
+
+	// Get current viewport content
+	viewportContent := m.viewport.View()
+
+	// Add loading indicator if streaming
+	if m.loading && m.isStreaming {
+		viewportContent += "\n" + m.spinner.View() + " Thinking..."
+	}
+
+	// Create a styled viewport container
+	styledViewport := viewportStyle.Render(viewportContent)
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		m.headerView(),
+		styledViewport,
+		m.footerView(),
+	)
 }
 
 func (m streamingResponseModel) headerView() string {
-	title := "AI Response"
-	if m.loading {
-		title = fmt.Sprintf("%s %s Generating...", m.spinner.View(), title)
-	}
-
+	title := "Nyron AI - Your AI Based Terminal"
 	titleStyled := titleStyle.Render(title)
 	line := strings.Repeat("─", max(0, m.viewport.Width-lipgloss.Width(titleStyled)))
 	return lipgloss.JoinHorizontal(lipgloss.Center, titleStyled, line)
 }
 
 func (m streamingResponseModel) footerView() string {
-	info := ""
-	if m.loading {
-		info = "⏳ Streaming..."
+	helpView := m.help.View(m.keys)
+
+	var inputStyle lipgloss.Style
+	if m.focused == focusInput {
+		inputStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, false, true).BorderForeground(lipgloss.Color("63"))
 	} else {
-		scrollInfo := fmt.Sprintf("%3.f%%", m.viewport.ScrollPercent()*100)
-		helpText := " • ↑/↓ j/k pgup/pgdn g/G scroll • q quit"
-		info = infoStyle.Render(scrollInfo + helpText)
+		inputStyle = lipgloss.NewStyle().Border(lipgloss.HiddenBorder(), false, false, false, true)
 	}
-	line := strings.Repeat("─", max(0, m.viewport.Width-lipgloss.Width(info)))
-	return lipgloss.JoinHorizontal(lipgloss.Center, line, info)
+
+	return lipgloss.JoinVertical(lipgloss.Left, inputStyle.Render(m.input.View()), helpView)
 }
 
 // Run helper remains the same
-func RunStreamingResponseModel(prompt string) {
+func RunStreamingResponseModel() {
 	p := tea.NewProgram(
-		NewStreamingResponseModel(prompt),
+		NewStreamingResponseModel(),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)
