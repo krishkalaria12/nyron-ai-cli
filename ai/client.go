@@ -89,15 +89,33 @@ func GeminiStreamAPI(prompt string, responseChan chan<- StreamMessage) {
 	}
 }
 
-// OpenAIStreamAPI streams the response in real-time through a channel
-func OpenAIStreamAPI(prompt string, responseChan chan<- StreamMessage) {
-	defer close(responseChan)
+// GeminiAPI generates a complete response using Gemini API
+func GeminiAPI(prompt string) (string, error) {
+	main_client := getGeminiClient()
 
+	result, err := main_client.Models.GenerateContent(
+		context.Background(),
+		"gemini-2.5-flash",
+		genai.Text(prompts.FinalPrompt(prompt, "gemini")),
+		nil,
+	)
+
+	if err != nil {
+		return "", fmt.Errorf("error generating response: %w", err)
+	}
+
+	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("no response generated")
+	}
+
+	return result.Candidates[0].Content.Parts[0].Text, nil
+}
+
+// OpenAIAPI generates a complete response using OpenAI API
+func OpenAIAPI(prompt string) (string, error) {
 	main_client := getOpenaiClient()
 
-	ctx := context.Background()
-
-	stream := main_client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
+	chatCompletion, err := main_client.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.UserMessage(prompts.FinalPrompt(prompt, "openai")),
 		},
@@ -105,41 +123,13 @@ func OpenAIStreamAPI(prompt string, responseChan chan<- StreamMessage) {
 		Model: openai.ChatModelGPT5Mini,
 	})
 
-	acc := openai.ChatCompletionAccumulator{}
-
-	for stream.Next() {
-		chunk := stream.Current()
-		acc.AddChunk(chunk)
-
-		// Handle finished content
-		if content, ok := acc.JustFinishedContent(); ok {
-			responseChan <- StreamMessage{
-				Content: content,
-				Error:   nil,
-				Done:    false,
-			}
-		}
-
-		// Handle streaming chunks
-		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-			responseChan <- StreamMessage{
-				Content: chunk.Choices[0].Delta.Content,
-				Error:   nil,
-				Done:    false,
-			}
-		}
+	if err != nil {
+		return "", fmt.Errorf("error generating response: %w", err)
 	}
 
-	if stream.Err() != nil {
-		responseChan <- StreamMessage{
-			Error: stream.Err(),
-			Done:  true,
-		}
-		return
+	if len(chatCompletion.Choices) == 0 {
+		return "", fmt.Errorf("no response generated")
 	}
 
-	// Send done signal
-	responseChan <- StreamMessage{
-		Done: true,
-	}
+	return chatCompletion.Choices[0].Message.Content, nil
 }

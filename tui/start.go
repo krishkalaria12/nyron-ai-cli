@@ -1,5 +1,5 @@
 package tui
 
 func StartTUI() {
-	RunStreamingResponseModel()
+	RunChatModel()
 }

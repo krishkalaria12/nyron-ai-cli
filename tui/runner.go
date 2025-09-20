@@ -5,13 +5,13 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/krishkalaria12/nyron-ai-cli/tui/components/streaming"
+	"github.com/krishkalaria12/nyron-ai-cli/tui/components/chat"
 )
 
-// RunStreamingResponseModel starts the main streaming response TUI
-func RunStreamingResponseModel() {
+// RunChatModel starts the main chat TUI
+func RunChatModel() {
 	p := tea.NewProgram(
-		streaming.NewStreamingResponseModel(),
+		chat.NewChatModel(),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)

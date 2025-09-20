@@ -17,7 +17,7 @@ type InputModel struct {
 
 func InitialInputModel() InputModel {
 	ta := textarea.New()
-	ta.Placeholder = "Enter your prompt to ask AI... (Ctrl+Enter to send, Enter for new line)"
+	ta.Placeholder = "Type your message…  Ctrl+Enter: send  Enter: new line"
 	ta.Focus()
 	ta.SetWidth(80) // Default width, will be updated on resize
 	ta.SetHeight(3) // Multi-line height
