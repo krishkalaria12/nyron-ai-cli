@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/krishkalaria12/nyron-ai-cli/config"
+	prompts "github.com/krishkalaria12/nyron-ai-cli/config/prompts"
 	"github.com/openai/openai-go/v2"
 	"github.com/openai/openai-go/v2/option"
 	"google.golang.org/genai"
@@ -61,7 +62,7 @@ func GeminiStreamAPI(prompt string, responseChan chan<- StreamMessage) {
 	stream := main_client.Models.GenerateContentStream(
 		context.Background(),
 		"gemini-2.5-flash",
-		genai.Text(prompt),
+		genai.Text(prompts.FinalPrompt(prompt, "gemini")),
 		nil,
 	)
 
@@ -98,7 +99,7 @@ func OpenAIStreamAPI(prompt string, responseChan chan<- StreamMessage) {
 
 	stream := main_client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
 		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.UserMessage(prompt),
+			openai.UserMessage(prompts.FinalPrompt(prompt, "openai")),
 		},
 		Seed:  openai.Int(0),
 		Model: openai.ChatModelGPT5Mini,

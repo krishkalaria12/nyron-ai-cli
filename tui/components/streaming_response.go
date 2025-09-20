@@ -24,11 +24,12 @@ const (
 )
 
 type keyMap struct {
-	Tab   key.Binding
-	Up    key.Binding
-	Down  key.Binding
-	Enter key.Binding
-	Quit  key.Binding
+	Tab    key.Binding
+	Up     key.Binding
+	Down   key.Binding
+	Scroll key.Binding
+	Enter  key.Binding
+	Quit   key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -43,31 +44,33 @@ func (k keyMap) FullHelp() [][]key.Binding {
 }
 
 var keys = keyMap{
-	Up:    key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "scroll up")),
-	Down:  key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "scroll down")),
-	Tab:   key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "switch focus")),
-	Enter: key.NewBinding(key.WithKeys("ctrl+enter"), key.WithHelp("ctrl+enter", "send message")),
-	Quit:  key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q/ctrl+c", "quit")),
+	Up:     key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "scroll up")),
+	Down:   key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "scroll down")),
+	Scroll: key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("scroll up", "scroll down")),
+	Tab:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "switch focus")),
+	Enter:  key.NewBinding(key.WithKeys("ctrl+enter"), key.WithHelp("ctrl+enter", "send message")),
+	Quit:   key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 }
 
 type streamingResponseModel struct {
-	content      string
-	rawContent   string // Store raw markdown for re-rendering on resize
-	loading      bool
-	ready        bool
-	viewport     viewport.Model
-	spinner      spinner.Model
-	input        editor.InputModel
-	keys         keyMap
-	focused      focusState
-	help         help.Model
-	width        int
-	height       int
-	prompt       string
-	responseChan chan ai.StreamMessage // producer -> forwarder
-	forwardChan  chan ai.StreamMessage // forwarder -> tea loop
-	err          error
-	isStreaming  bool // Track if we're currently streaming
+	content         string
+	userSentMessage bool
+	rawContent      string // Store raw markdown for re-rendering on resize
+	loading         bool
+	ready           bool
+	viewport        viewport.Model
+	spinner         spinner.Model
+	input           editor.InputModel
+	keys            keyMap
+	focused         focusState
+	help            help.Model
+	width           int
+	height          int
+	prompt          string
+	responseChan    chan ai.StreamMessage // producer -> forwarder
+	forwardChan     chan ai.StreamMessage // forwarder -> tea loop
+	err             error
+	isStreaming     bool // Track if we're currently streaming
 }
 
 // Messages
@@ -95,15 +98,16 @@ func NewStreamingResponseModel() streamingResponseModel {
 	inputModel.InputKeys = editor.DefaultEditorKeyMap()
 
 	return streamingResponseModel{
-		loading:      false, // Don't start loading immediately
-		spinner:      s,
-		input:        inputModel, // Assign the input model
-		focused:      focusInput, // Start focused on input
-		keys:         keys,
-		help:         help.New(),
-		responseChan: make(chan ai.StreamMessage),
-		forwardChan:  make(chan ai.StreamMessage),
-		isStreaming:  false,
+		loading:         false, // Don't start loading immediately
+		spinner:         s,
+		input:           inputModel, // Assign the input model
+		focused:         focusInput, // Start focused on input
+		keys:            keys,
+		help:            help.New(),
+		responseChan:    make(chan ai.StreamMessage),
+		forwardChan:     make(chan ai.StreamMessage),
+		isStreaming:     false,
+		userSentMessage: false,
 	}
 }
 
@@ -292,6 +296,7 @@ func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Re-focus input for next query
 			m.focused = focusInput
+			m.input.TextArea.SetValue(m.prompt)
 			cmd = m.input.Focus()
 			return m, cmd
 		}
@@ -300,14 +305,8 @@ func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if in.Done {
 			m.loading = false
 			m.isStreaming = false
-			// final render of accumulated content (in case any sanitization appended fences)
-			if m.rawContent != "" {
-				final := m.renderContentWithCurrentWidth()
-				if m.ready {
-					m.viewport.SetContent(final)
-					m.viewport.GotoBottom()
-				}
-			}
+			m.prompt = ""
+			m.userSentMessage = false
 
 			// Re-focus input for next query
 			m.focused = focusInput
@@ -317,16 +316,6 @@ func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Append the incoming chunk to the raw content (accumulate)
 		m.rawContent += in.Content
-
-		// Render the accumulated markdown (prevents broken fences & flicker).
-		rendered := m.renderContentWithCurrentWidth()
-
-		// Update viewport
-		if m.ready {
-			m.viewport.SetContent(rendered)
-			// Auto-scroll to bottom for live updates
-			m.viewport.GotoBottom()
-		}
 
 		// Schedule next wait for message
 		return m, waitForForwardMessage(m.forwardChan)
@@ -344,6 +333,9 @@ func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd = m.input.Focus()
 				cmds = append(cmds, cmd)
 			}
+		case key.Matches(msg, m.keys.Scroll):
+			m.focused = focusViewport
+			m.input.Blur()
 		}
 
 		// Handle focus-specific key events
@@ -370,22 +362,12 @@ func (m streamingResponseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.input.Blur()
 				m.focused = focusViewport
 
-				// Add the user's message to the viewport
-				userMessage := fmt.Sprintf("\n**You:** %s\n\n**AI:** ", inputValue)
-				currentContent := ""
-				if m.ready {
-					currentContent = m.viewport.View()
-				}
-				newContent := currentContent + userMessage
+				m.isStreaming = true
+				m.userSentMessage = true
 
 				// Clear previous response content and set new content
 				m.rawContent = ""
 				m.content = ""
-
-				if m.ready {
-					m.viewport.SetContent(newContent)
-					m.viewport.GotoBottom()
-				}
 
 				// Create new channels for this stream
 				m.responseChan = make(chan ai.StreamMessage)
@@ -432,10 +414,52 @@ func (m streamingResponseModel) View() string {
 		return fmt.Sprintf("Error: %v\nPress q to quit.", m.err)
 	}
 
+	if !m.isStreaming && !m.loading {
+		// final render of accumulated content (in case any sanitization appended fences)
+		if m.rawContent != "" {
+			final := m.renderContentWithCurrentWidth()
+			if m.ready {
+				m.viewport.SetContent(final)
+				m.viewport.GotoBottom()
+			}
+		}
+	}
+
+	if m.userSentMessage {
+		// Add the user's message to the viewport
+		userMessage := fmt.Sprintf("\n**You:** %s\n\n**AI:** ", m.prompt)
+		currentContent := ""
+		if m.ready {
+			currentContent = m.viewport.View()
+		}
+		newContent := currentContent + userMessage
+
+		userMarkMsg := ""
+		userMarkdownMsg, err := ai.RenderToTerminalWithWidth(string(newContent), m.width)
+
+		if err != nil {
+			userMarkMsg = newContent
+		} else {
+			userMarkMsg = userMarkdownMsg
+		}
+
+		if m.ready {
+			m.viewport.SetContent(userMarkMsg)
+			m.viewport.GotoBottom()
+		}
+	}
+
+	// Render the accumulated markdown (prevents broken fences & flicker).
+	rendered := m.renderContentWithCurrentWidth()
+	// Update viewport
+	if m.ready {
+		m.viewport.SetContent(rendered)
+		// Auto-scroll to bottom for live updates
+		m.viewport.GotoBottom()
+	}
+
 	var viewportStyle lipgloss.Style
-	if m.focused == focusViewport {
-		viewportStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("63"))
-	} else {
+	if m.focused != focusViewport {
 		viewportStyle = lipgloss.NewStyle().Border(lipgloss.HiddenBorder())
 	}
 	m.viewport.Style = viewportStyle
