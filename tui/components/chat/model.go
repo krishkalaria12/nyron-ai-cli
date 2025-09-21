@@ -182,9 +182,11 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showDialog = true
 			return m, m.modelDialog.Init()
 		case key.Matches(msg, m.keys.Up), key.Matches(msg, m.keys.Down), key.Matches(msg, m.keys.PageUp), key.Matches(msg, m.keys.PageDown):
-			var vpCmd tea.Cmd
-			m.viewport, vpCmd = m.viewport.Update(msg)
-			cmds = append(cmds, vpCmd)
+			if m.focused == focusViewport {
+				var vpCmd tea.Cmd
+				m.viewport, vpCmd = m.viewport.Update(msg)
+				cmds = append(cmds, vpCmd)
+			}
 		case key.Matches(msg, m.keys.Tab):
 			if m.focused == focusInput {
 				m.focused = focusViewport
@@ -273,8 +275,8 @@ func (m *ChatModel) updateViewportContent() {
 	for _, msg := range m.messages {
 		if msg.IsUser {
 			userLabel := userMessageStyle.Render("You:")
-			userContent := userMessageContentStyle.Width(m.width - userMessageContentStyle.GetHorizontalFrameSize() - 2).Render(msg.Content)
-			content += lipgloss.JoinVertical(lipgloss.Left, userLabel, userContent) + "\n\n"
+			userContent := userMessageContentStyle.Width(m.width - userMessageContentStyle.GetHorizontalFrameSize()).Render(msg.Content)
+			content += userLabel + " " + userContent + "\n\n"
 		} else if msg.IsRendered {
 			content += m.renderAIMessage(msg)
 		}
@@ -282,7 +284,7 @@ func (m *ChatModel) updateViewportContent() {
 	if m.loading {
 		aiLabel := aiMessageStyle.Render("AI:")
 		thinkingText := thinkingStyle.Render(m.spinner.View() + " Thinking...")
-		content += lipgloss.JoinVertical(lipgloss.Left, aiLabel, thinkingText)
+		content += aiLabel + " " + thinkingText
 	}
 	m.viewport.SetContent(content)
 	m.viewport.GotoBottom()
@@ -290,7 +292,7 @@ func (m *ChatModel) updateViewportContent() {
 
 func (m *ChatModel) renderAIMessage(msg Message) string {
 	aiLabel := aiMessageStyle.Render("AI:")
-	aiContent := aiMessageContentStyle.Width(m.width - aiMessageContentStyle.GetHorizontalFrameSize() - 2).Render(msg.Rendered)
+	aiContent := aiMessageContentStyle.Width(m.width - aiMessageContentStyle.GetHorizontalFrameSize()).Render(msg.Rendered)
 	return lipgloss.JoinVertical(lipgloss.Left, aiLabel, aiContent) + "\n\n"
 }
 

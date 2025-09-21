@@ -46,24 +46,14 @@ var (
 				Bold(true)
 
 	userMessageContentStyle = lipgloss.NewStyle().
-				Foreground(textPrimary).
-				Background(lipgloss.Color("#f0f9ff")). // Light blue bg
-				Padding(1, 2).
-				MarginLeft(2).
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(accentColor)
+				Foreground(lipgloss.Color("#ffffff"))
 
 	aiMessageStyle = lipgloss.NewStyle().
 			Foreground(primaryColor).
 			Bold(true)
 
 	aiMessageContentStyle = lipgloss.NewStyle().
-				Foreground(textPrimary).
-				Background(lipgloss.Color("#faf5ff")). // Light purple bg
-				Padding(1, 2).
-				MarginLeft(2).
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(secondaryColor)
+				Foreground(lipgloss.Color("#ffffff"))
 
 	// Header style - a slim, single-line bar
 	headerStyle = lipgloss.NewStyle().
