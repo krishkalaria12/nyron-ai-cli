@@ -13,32 +13,43 @@ func (m ChatModel) View() string {
 
 	// Error display
 	if m.err != nil {
-		return fmt.Sprintf("Error: %v\nPress Ctrl+C to quit", m.err)
+		errorMsg := errorStyle.Render(fmt.Sprintf("Error: %v", m.err))
+		helpMsg := helpStyle.Render("Press Ctrl+C to quit")
+		return appStyle.Render(lipgloss.JoinVertical(lipgloss.Center, errorMsg, helpMsg))
 	}
 
-	// Header
-	headerText := headerStyle.Render("💬 Nyron AI Chat")
+	// Dialog view
+	if m.showDialog {
+		dialog := dialogStyle.Render(m.modelDialog.View())
+		return lipgloss.Place(
+			m.width, m.height,
+			lipgloss.Center, lipgloss.Center,
+			dialog,
+			lipgloss.WithWhitespaceChars("░"),
+			lipgloss.WithWhitespaceForeground(lipgloss.Color("240")),
+		)
+	}
 
-	// Main content area
-	content := m.viewport.View()
+	// --- Main App View ---
+	headerView := headerStyle.Width(m.width).Render("💬 Nyron AI Chat")
+	viewportView := m.viewport.View()
+	helpView := helpStyle.Width(m.width).Render(m.help.View(m.keys))
 
-	// Input area
-	// The width of the m.input.TextArea component is already being managed in the
-	// model's Update function. We just let the border style wrap it.
-	input := m.input.View()
-	inputSection := inputBorderStyle.Render(input)
+	var inputView string
+	if m.focused == focusInput {
+		inputView = focusedInputBorderStyle.Render(m.input.View())
+	} else {
+		inputView = inputBorderStyle.Render(m.input.View())
+	}
 
-	// Help
-	help := m.help.View(m.keys)
-
-	// Combine all sections vertically.
-	// The viewport's height is set in the model, ensuring it fills the
-	// available space without pushing other components off-screen.
-	return lipgloss.JoinVertical(
+	// Join all sections vertically.
+	mainView := lipgloss.JoinVertical(
 		lipgloss.Left,
-		headerText,
-		content,
-		inputSection,
-		help,
+		headerView,
+		viewportView,
+		inputView,
+		helpView,
 	)
+
+	return appStyle.Render(mainView)
 }

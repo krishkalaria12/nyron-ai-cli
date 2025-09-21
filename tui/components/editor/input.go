@@ -17,12 +17,13 @@ type InputModel struct {
 
 func InitialInputModel() InputModel {
 	ta := textarea.New()
-	ta.Placeholder = "Type your message…  Ctrl+Enter: send  Enter: new line"
+	ta.Placeholder = "Type your message…"
 	ta.Focus()
 	ta.SetWidth(80) // Default width, will be updated on resize
-	ta.SetHeight(3) // Multi-line height
+	ta.SetHeight(2) // Multi-line height
 	ta.ShowLineNumbers = false
 	ta.KeyMap.InsertNewline.SetEnabled(true) // Allow Enter for new lines
+	ta.KeyMap.InsertNewline.SetKeys("shift+enter", "ctrl+j")
 
 	return InputModel{
 		TextArea: ta,

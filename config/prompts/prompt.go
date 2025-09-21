@@ -14,6 +14,9 @@ var geminiSysPrompt string
 //go:embed openai.md
 var openaiSysPrompt string
 
+//go:embed openrouter.md
+var openrouterSysPrompt string
+
 func FinalPrompt(userPrompt string, provider string) string {
 	// Template for user prompt
 	userPromptTemplate := `User Prompt: {{.UserPrompt}}`
@@ -45,6 +48,8 @@ func FinalPrompt(userPrompt string, provider string) string {
 		return geminiSysPrompt + "\n\n" + formattedUserPrompt
 	case "openai":
 		return openaiSysPrompt + "\n\n" + formattedUserPrompt
+	case "openrouter":
+		return openrouterSysPrompt + "\n\n" + formattedUserPrompt
 	default:
 		return formattedUserPrompt // fallback to just user prompt
 	}
