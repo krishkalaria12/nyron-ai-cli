@@ -25,8 +25,6 @@ func (m ChatModel) View() string {
 			m.width, m.height,
 			lipgloss.Center, lipgloss.Center,
 			dialog,
-			lipgloss.WithWhitespaceChars("░"),
-			lipgloss.WithWhitespaceForeground(lipgloss.Color("240")),
 		)
 	}
 
