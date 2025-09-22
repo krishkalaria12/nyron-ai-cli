@@ -76,6 +76,12 @@ var (
 			Italic(true).
 			PaddingLeft(2)
 
+	// Thinking header style with greyer color
+	thinkingHeaderStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6b7280")). // Gray-500 - greyer than textMuted
+				Bold(true).
+				PaddingLeft(2)
+
 	// Help text style
 	helpStyle = lipgloss.NewStyle().
 			Foreground(textMuted)

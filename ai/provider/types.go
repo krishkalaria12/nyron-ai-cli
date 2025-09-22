@@ -6,3 +6,9 @@ type StreamMessage struct {
 	Error   error
 	Done    bool
 }
+
+type AIResponseMessage struct {
+	Thinking string
+	Content  string
+	Err      error
+}

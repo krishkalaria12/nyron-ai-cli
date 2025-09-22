@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/krishkalaria12/nyron-ai-cli/ai"
+	"github.com/krishkalaria12/nyron-ai-cli/ai/provider"
 	"github.com/krishkalaria12/nyron-ai-cli/config"
 	"github.com/krishkalaria12/nyron-ai-cli/tui/components/dialogs/models"
 	editor "github.com/krishkalaria12/nyron-ai-cli/tui/components/editor"
@@ -60,6 +61,7 @@ type Message struct {
 	IsUser     bool
 	Rendered   string // Cached markdown rendering
 	IsRendered bool   // Whether markdown processing is complete
+	Thinking   string // AI thinking process (if available)
 }
 
 type ChatModel struct {
@@ -81,8 +83,9 @@ type ChatModel struct {
 
 // Messages
 type responseMsg struct {
-	content string
-	err     error
+	thinking string
+	content  string
+	err      error
 }
 
 func NewChatModel() ChatModel {
@@ -122,19 +125,21 @@ func (m ChatModel) Init() tea.Cmd {
 
 func getAIResponse(prompt string, selectedModel config.SelectedModel) tea.Cmd {
 	return func() tea.Msg {
-		var response string
-		var err error
+		var response provider.AIResponseMessage
 		switch selectedModel.Provider {
 		case "gemini":
-			response, err = ai.GeminiAPI(prompt)
-		case "openai":
-			response, err = ai.OpenAIAPI(prompt)
+			response = ai.GeminiAPI(prompt, selectedModel.Model)
 		case "openrouter":
-			response, err = ai.OpenRouterAPI(prompt, selectedModel.Model)
+			response = ai.OpenRouterAPI(prompt, selectedModel.Model)
 		default:
-			response, err = ai.GeminiAPI(prompt)
+			response = ai.GeminiAPI(prompt, "gemini-2.5-flash")
 		}
-		return responseMsg{content: response, err: err}
+
+		return responseMsg{
+			thinking: response.Thinking,
+			content:  response.Content,
+			err:      response.Err,
+		}
 	}
 }
 
@@ -147,19 +152,15 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.width = msg.Width
 
-		headerView := headerStyle.Render("Header")
-		helpView := helpStyle.Width(m.width).Render(m.help.View(m.keys))
-		inputView := focusedInputBorderStyle.Width(m.width).Render(m.input.View())
-
-		verticalMargin := lipgloss.Height(headerView) + lipgloss.Height(inputView) + lipgloss.Height(helpView)
-
 		m.viewport.Width = m.width
-		m.viewport.Height = m.height - verticalMargin
 		m.help.Width = m.width
 
 		// Calculate input width accounting for border and padding
 		inputFrameSize := focusedInputBorderStyle.GetHorizontalFrameSize()
 		m.input.TextArea.SetWidth(m.width - inputFrameSize)
+
+		// Update viewport height based on current input height
+		m.updateViewportHeight()
 
 		if len(m.messages) > 0 {
 			m.updateViewportContent()
@@ -186,6 +187,19 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var vpCmd tea.Cmd
 				m.viewport, vpCmd = m.viewport.Update(msg)
 				cmds = append(cmds, vpCmd)
+			} else if m.focused == focusInput {
+				// Pass navigation keys to the input for cursor movement and scrolling
+				oldInputHeight := m.input.TextArea.Height()
+				var updatedModel tea.Model
+				updatedModel, cmd = m.input.Update(msg)
+				m.input = updatedModel.(editor.InputModel)
+
+				// Update viewport height if input height changed
+				if m.input.TextArea.Height() != oldInputHeight {
+					m.updateViewportHeight()
+				}
+
+				cmds = append(cmds, cmd)
 			}
 		case key.Matches(msg, m.keys.Tab):
 			if m.focused == focusInput {
@@ -201,17 +215,29 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				userMessage := m.input.Value()
 				m.messages = append(m.messages, Message{Content: userMessage, IsUser: true})
 				m.input.Reset()
+
+				// Reset input height to minimum after clearing
+				m.input.TextArea.SetHeight(m.input.MinHeight())
+				m.updateViewportHeight()
+
 				m.loading = true
-				m.updateViewportContent()
+				m.updateViewportContentWithScroll(true)
 				m.focused = focusViewport
 				m.input.Blur()
 				cmds = append(cmds, m.spinner.Tick, getAIResponse(userMessage, m.selectedModel))
 			}
 		default:
 			if m.focused == focusInput {
+				oldInputHeight := m.input.TextArea.Height()
 				var updatedModel tea.Model
 				updatedModel, cmd = m.input.Update(msg)
 				m.input = updatedModel.(editor.InputModel)
+
+				// Update viewport height if input height changed
+				if m.input.TextArea.Height() != oldInputHeight {
+					m.updateViewportHeight()
+				}
+
 				cmds = append(cmds, cmd)
 			} else if m.focused == focusViewport {
 				var vpCmd tea.Cmd
@@ -233,7 +259,14 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 		} else {
 			messageIndex := len(m.messages)
-			m.messages = append(m.messages, Message{Content: msg.content, IsUser: false, IsRendered: false})
+			// Create message with both thinking and content
+			newMsg := Message{
+				Content:    msg.content,
+				IsUser:     false,
+				IsRendered: false,
+				Thinking:   msg.thinking,
+			}
+			m.messages = append(m.messages, newMsg)
 			cmds = append(cmds, util.RenderMarkdownAsync(msg.content, m.width-4, messageIndex))
 		}
 
@@ -249,7 +282,7 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.messages[msg.MessageIndex].Rendered = msg.Rendered
 			m.messages[msg.MessageIndex].IsRendered = true
 			m.loading = false
-			m.updateViewportContent()
+			m.updateViewportContentWithScroll(true)
 			cmds = append(cmds, util.DelayedFocus())
 		}
 
@@ -271,6 +304,10 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *ChatModel) updateViewportContent() {
+	m.updateViewportContentWithScroll(false)
+}
+
+func (m *ChatModel) updateViewportContentWithScroll(autoScroll bool) {
 	var content string
 	for _, msg := range m.messages {
 		if msg.IsUser {
@@ -287,15 +324,40 @@ func (m *ChatModel) updateViewportContent() {
 		content += aiLabel + " " + thinkingText
 	}
 	m.viewport.SetContent(content)
-	m.viewport.GotoBottom()
+	if autoScroll {
+		m.viewport.GotoBottom()
+	}
 }
 
 func (m *ChatModel) renderAIMessage(msg Message) string {
 	aiLabel := aiMessageStyle.Render("AI:")
+
+	var content string
+
+	// Add thinking section if available
+	if msg.Thinking != "" {
+		thinkingHeader := thinkingHeaderStyle.Render("🤔 Thinking:")
+		thinkingContent := thinkingStyle.Width(m.width - thinkingStyle.GetHorizontalFrameSize()).Render(msg.Thinking)
+		content = lipgloss.JoinVertical(lipgloss.Left, thinkingHeader, thinkingContent)
+		content += "\n\n"
+	}
+
+	// Add main response content
 	aiContent := aiMessageContentStyle.Width(m.width - aiMessageContentStyle.GetHorizontalFrameSize()).Render(msg.Rendered)
-	return lipgloss.JoinVertical(lipgloss.Left, aiLabel, aiContent) + "\n\n"
+	content += lipgloss.JoinVertical(lipgloss.Left, aiLabel, aiContent)
+
+	return content + "\n\n"
 }
 
 func (m *ChatModel) updateSpinnerContent() {
 	m.updateViewportContent()
+}
+
+func (m *ChatModel) updateViewportHeight() {
+	headerView := headerStyle.Render("Header")
+	helpView := helpStyle.Width(m.width).Render(m.help.View(m.keys))
+	inputView := focusedInputBorderStyle.Width(m.width).Render(m.input.View())
+
+	verticalMargin := lipgloss.Height(headerView) + lipgloss.Height(inputView) + lipgloss.Height(helpView)
+	m.viewport.Height = m.height - verticalMargin
 }

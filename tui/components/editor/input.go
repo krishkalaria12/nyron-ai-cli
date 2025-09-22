@@ -1,6 +1,8 @@
 package components
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -12,6 +14,8 @@ type InputModel struct {
 	submitted bool
 	width     int
 	height    int
+	minHeight int
+	maxHeight int
 	InputKeys EditorKeyMap
 }
 
@@ -25,10 +29,15 @@ func InitialInputModel() InputModel {
 	ta.KeyMap.InsertNewline.SetEnabled(true) // Allow Enter for new lines
 	ta.KeyMap.InsertNewline.SetKeys("shift+enter", "ctrl+j")
 
+	// The textarea component handles scrolling automatically
+	// when content exceeds the visible area
+
 	return InputModel{
-		TextArea: ta,
-		width:    80,
-		height:   24,
+		TextArea:  ta,
+		width:     80,
+		height:    24,
+		minHeight: 2,
+		maxHeight: 8,
 	}
 }
 
@@ -45,7 +54,13 @@ func (m InputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
+	oldValue := m.TextArea.Value()
 	m.TextArea, cmd = m.TextArea.Update(msg)
+
+	if m.TextArea.Value() != oldValue {
+		newHeight := m.CalculateHeight()
+		m.TextArea.SetHeight(newHeight)
+	}
 
 	return m, cmd
 }
@@ -69,4 +84,40 @@ func (m *InputModel) Value() string {
 
 func (m *InputModel) Reset() {
 	m.TextArea.Reset()
+}
+
+func (m *InputModel) MinHeight() int {
+	return m.minHeight
+}
+
+func (m *InputModel) CalculateHeight() int {
+	content := m.TextArea.Value()
+	if content == "" {
+		return m.minHeight
+	}
+
+	lines := strings.Split(content, "\n")
+
+	width := m.TextArea.Width()
+	if width <= 0 {
+		width = 80
+	}
+
+	totalLines := 0
+	for _, line := range lines {
+		if line == "" {
+			totalLines++
+		} else {
+			wrappedLines := (len(line)-1)/width + 1
+			totalLines += wrappedLines
+		}
+	}
+
+	if totalLines < m.minHeight {
+		return m.minHeight
+	}
+	if totalLines > m.maxHeight {
+		return m.maxHeight
+	}
+	return totalLines
 }

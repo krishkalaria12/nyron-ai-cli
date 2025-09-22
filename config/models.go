@@ -26,10 +26,6 @@ var (
 		ID:   "gemini",
 		Name: "Google Gemini",
 	}
-	ProviderOpenAI = Provider{
-		ID:   "openai",
-		Name: "OpenAI",
-	}
 	ProviderOpenRouter = Provider{
 		ID:   "openrouter",
 		Name: "OpenRouter",
@@ -48,24 +44,6 @@ var (
 			ID:          "gemini-2.5-pro",
 			Name:        "Gemini 2.5 Pro",
 			Description: "Advanced model with superior reasoning capabilities",
-		},
-	}
-
-	OpenAIModels = []Model{
-		{
-			ID:          "gpt-5-2025-08-07",
-			Name:        "GPT-5",
-			Description: "Latest GPT-5 model with enhanced capabilities",
-		},
-		{
-			ID:          "gpt-5-mini-2025-08-07",
-			Name:        "GPT-5 Mini",
-			Description: "Lightweight version of GPT-5 for faster responses",
-		},
-		{
-			ID:          "gpt-4o-2024-08-06",
-			Name:        "GPT-4o",
-			Description: "Optimized GPT-4 model for improved performance",
 		},
 	}
 
@@ -90,6 +68,21 @@ var (
 			Name:        "Kimi K2",
 			Description: "Kimi K2 Instruct is a large-scale Mixture-of-Experts (MoE) language model",
 		},
+		{
+			ID:          "openai/gpt-5",
+			Name:        "GPT 5",
+			Description: "GPT-5 is OpenAI’s most advanced model, offering major improvements in reasoning, code quality, and user experience.",
+		},
+		{
+			ID:          "openai/gpt-5-mini",
+			Name:        "GPT 5 Mini",
+			Description: "GPT-5 Mini is a compact version of GPT-5, designed to handle lighter-weight reasoning tasks.",
+		},
+		{
+			ID:          "openai/gpt-4.1",
+			Name:        "GPT 4.1",
+			Description: "GPT-4.1 is a flagship large language model optimized for advanced instruction following, real-world software engineering, and long-context reasoning.",
+		},
 	}
 )
 
@@ -97,7 +90,6 @@ var (
 func GetAllProviders() []Provider {
 	return []Provider{
 		ProviderGemini,
-		ProviderOpenAI,
 		ProviderOpenRouter,
 	}
 }
@@ -107,8 +99,6 @@ func GetModelsByProvider(providerID string) []Model {
 	switch providerID {
 	case ProviderGemini.ID:
 		return GeminiModels
-	case ProviderOpenAI.ID:
-		return OpenAIModels
 	case ProviderOpenRouter.ID:
 		return OpenRouterModels
 	default:

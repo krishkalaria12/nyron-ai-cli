@@ -34,23 +34,54 @@ func getGeminiClient() *genai.Client {
 }
 
 // GeminiAPI generates a complete response using Gemini API
-func GeminiAPI(prompt string) (string, error) {
+func GeminiAPI(prompt string, model string) AIResponseMessage {
 	main_client := getGeminiClient()
 
 	result, err := main_client.Models.GenerateContent(
 		context.Background(),
-		"gemini-2.5-flash",
+		model,
 		genai.Text(prompts.FinalPrompt(prompt, "gemini")),
 		nil,
 	)
 
+	var res AIResponseMessage
+
 	if err != nil {
-		return "", fmt.Errorf("error generating response: %w", err)
+		res = AIResponseMessage{
+			Thinking: "",
+			Content:  "",
+			Err:      fmt.Errorf("error generating response: %w", err),
+		}
+		return res
 	}
 
 	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("no response generated")
+		res = AIResponseMessage{
+			Thinking: "",
+			Content:  "",
+			Err:      fmt.Errorf("No Response Generated"),
+		}
+		return res
 	}
 
-	return result.Candidates[0].Content.Parts[0].Text, nil
+	thinking := ""
+	response := ""
+
+	for _, part := range result.Candidates[0].Content.Parts {
+		if part.Text != "" {
+			if part.Thought {
+				thinking += part.Text
+			} else {
+				response += part.Text
+			}
+		}
+	}
+
+	res = AIResponseMessage{
+		Thinking: thinking,
+		Content:  response,
+		Err:      nil,
+	}
+
+	return res
 }
