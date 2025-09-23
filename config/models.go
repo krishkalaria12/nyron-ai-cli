@@ -22,10 +22,6 @@ type Model struct {
 
 // Available providers
 var (
-	ProviderGemini = Provider{
-		ID:   "gemini",
-		Name: "Google Gemini",
-	}
 	ProviderOpenRouter = Provider{
 		ID:   "openrouter",
 		Name: "OpenRouter",
@@ -34,20 +30,32 @@ var (
 
 // Available models by provider
 var (
-	GeminiModels = []Model{
-		{
-			ID:          "gemini-2.5-flash",
-			Name:        "Gemini 2.5 Flash",
-			Description: "Fast and efficient model for quick responses",
-		},
-		{
-			ID:          "gemini-2.5-pro",
-			Name:        "Gemini 2.5 Pro",
-			Description: "Advanced model with superior reasoning capabilities",
-		},
-	}
-
 	OpenRouterModels = []Model{
+		{
+			ID:          "openai/gpt-5",
+			Name:        "GPT 5",
+			Description: "GPT-5 is OpenAI’s most advanced model, offering major improvements in reasoning, code quality, and user experience.",
+		},
+		{
+			ID:          "openai/gpt-5-mini",
+			Name:        "GPT 5 Mini",
+			Description: "GPT-5 Mini is a compact version of GPT-5, designed to handle lighter-weight reasoning tasks.",
+		},
+		{
+			ID:          "openai/gpt-4.1",
+			Name:        "GPT 4.1",
+			Description: "GPT-4.1 is a flagship large language model optimized for advanced instruction following, real-world software engineering, and long-context reasoning.",
+		},
+		{
+			ID:          "google/gemini-2.5-pro",
+			Name:        "Gemini 2.5 Pro",
+			Description: "Gemini 2.5 Pro is Google’s state-of-the-art AI model designed for advanced reasoning, coding, mathematics, and scientific tasks.",
+		},
+		{
+			ID:          "google/gemini-2.5-flash",
+			Name:        "Gemini 2.5 Flash",
+			Description: "Gemini 2.5 Flash is Google’s state-of-the-art AI model designed for advanced reasoning, coding, mathematics, and scientific tasks.",
+		},
 		{
 			ID:          "x-ai/grok-4-fast:free",
 			Name:        "Grok-4 Fast",
@@ -68,28 +76,12 @@ var (
 			Name:        "Kimi K2",
 			Description: "Kimi K2 Instruct is a large-scale Mixture-of-Experts (MoE) language model",
 		},
-		{
-			ID:          "openai/gpt-5",
-			Name:        "GPT 5",
-			Description: "GPT-5 is OpenAI’s most advanced model, offering major improvements in reasoning, code quality, and user experience.",
-		},
-		{
-			ID:          "openai/gpt-5-mini",
-			Name:        "GPT 5 Mini",
-			Description: "GPT-5 Mini is a compact version of GPT-5, designed to handle lighter-weight reasoning tasks.",
-		},
-		{
-			ID:          "openai/gpt-4.1",
-			Name:        "GPT 4.1",
-			Description: "GPT-4.1 is a flagship large language model optimized for advanced instruction following, real-world software engineering, and long-context reasoning.",
-		},
 	}
 )
 
 // GetAllProviders returns all available providers
 func GetAllProviders() []Provider {
 	return []Provider{
-		ProviderGemini,
 		ProviderOpenRouter,
 	}
 }
@@ -97,8 +89,6 @@ func GetAllProviders() []Provider {
 // GetModelsByProvider returns models for a specific provider
 func GetModelsByProvider(providerID string) []Model {
 	switch providerID {
-	case ProviderGemini.ID:
-		return GeminiModels
 	case ProviderOpenRouter.ID:
 		return OpenRouterModels
 	default:

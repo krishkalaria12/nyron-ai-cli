@@ -14,6 +14,7 @@ func OpenRouterAPI(prompt string, model string) AIResponseMessage {
 	client := openrouter.NewClient(
 		config.Config("OPENROUTER_API_KEY"),
 	)
+
 	resp, err := client.CreateChatCompletion(
 		context.Background(),
 		openrouter.ChatCompletionRequest{

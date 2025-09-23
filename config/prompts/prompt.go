@@ -7,12 +7,6 @@ import (
 )
 
 // Embed the markdown files at compile time
-//
-//go:embed gemini.md
-var geminiSysPrompt string
-
-//go:embed openai.md
-var openaiSysPrompt string
 
 //go:embed openrouter.md
 var openrouterSysPrompt string
@@ -44,10 +38,6 @@ func FinalPrompt(userPrompt string, provider string) string {
 
 	// Combine system prompt with user prompt based on provider
 	switch provider {
-	case "gemini":
-		return geminiSysPrompt + "\n\n" + formattedUserPrompt
-	case "openai":
-		return openaiSysPrompt + "\n\n" + formattedUserPrompt
 	case "openrouter":
 		return openrouterSysPrompt + "\n\n" + formattedUserPrompt
 	default:

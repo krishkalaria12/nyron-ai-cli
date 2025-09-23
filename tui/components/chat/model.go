@@ -127,12 +127,10 @@ func getAIResponse(prompt string, selectedModel config.SelectedModel) tea.Cmd {
 	return func() tea.Msg {
 		var response provider.AIResponseMessage
 		switch selectedModel.Provider {
-		case "gemini":
-			response = ai.GeminiAPI(prompt, selectedModel.Model)
 		case "openrouter":
 			response = ai.OpenRouterAPI(prompt, selectedModel.Model)
 		default:
-			response = ai.GeminiAPI(prompt, "gemini-2.5-flash")
+			response = ai.OpenRouterAPI(prompt, "gemini-2.5-flash")
 		}
 
 		return responseMsg{
