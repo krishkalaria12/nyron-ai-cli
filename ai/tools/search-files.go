@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/revrost/go-openrouter"
+	"github.com/revrost/go-openrouter/jsonschema"
 )
 
 type SearchFilesParams struct {
@@ -26,6 +29,42 @@ type SearchFilesResult struct {
 	Pattern    string
 	SearchPath string
 	Results    []SearchResult
+}
+
+var SearchFilesToolParams = jsonschema.Definition{
+	Type: jsonschema.Object,
+	Properties: map[string]jsonschema.Definition{
+		"SearchPath": {
+			Type:        jsonschema.String,
+			Description: "Path to search in (default: current directory)",
+		},
+		"Pattern": {
+			Type:        jsonschema.String,
+			Description: "File name pattern to search for (supports wildcards)",
+		},
+		"Recursive": {
+			Type:        jsonschema.Boolean,
+			Description: "Whether to search recursively in subdirectories",
+		},
+		"Type": {
+			Type:        jsonschema.String,
+			Description: "Filter by type: 'files', 'folders', or empty for all",
+		},
+	},
+	Required: []string{
+		"Pattern",
+	},
+}
+
+var SearchFilesOpenrouterFn = openrouter.FunctionDefinition{
+	Name:        "search_files",
+	Description: "Search for files and folders by pattern with optional filtering",
+	Parameters:  SearchFilesToolParams,
+}
+
+var SearchFilesTool = openrouter.Tool{
+	Type:     openrouter.ToolTypeFunction,
+	Function: &SearchFilesOpenrouterFn,
 }
 
 func SearchFiles(params SearchFilesParams) (SearchFilesResult, ToolError) {

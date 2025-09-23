@@ -8,6 +8,8 @@ import (
 	"net/url"
 
 	"github.com/krishkalaria12/nyron-ai-cli/config"
+	"github.com/revrost/go-openrouter"
+	"github.com/revrost/go-openrouter/jsonschema"
 )
 
 type WebSearchParams struct {
@@ -72,6 +74,46 @@ type WebSearchResult struct {
 	Organic          []OrganicResult  `json:"organic"`
 	PeopleAlsoAsk    []PeopleAlsoAsk  `json:"peopleAlsoAsk,omitempty"`
 	RelatedSearches  []RelatedSearch  `json:"relatedSearches,omitempty"`
+}
+
+var WebSearchToolParams = jsonschema.Definition{
+	Type: jsonschema.Object,
+	Properties: map[string]jsonschema.Definition{
+		"Query": {
+			Type:        jsonschema.String,
+			Description: "Search query",
+		},
+		"GL": {
+			Type:        jsonschema.String,
+			Description: "Country code for search results (default: us)",
+		},
+		"HL": {
+			Type:        jsonschema.String,
+			Description: "Language code for search results (default: en)",
+		},
+		"Type": {
+			Type:        jsonschema.String,
+			Description: "Search type (default: search)",
+		},
+		"Page": {
+			Type:        jsonschema.Integer,
+			Description: "Page number for pagination (default: 1)",
+		},
+	},
+	Required: []string{
+		"Query",
+	},
+}
+
+var WebSearchOpenrouterFn = openrouter.FunctionDefinition{
+	Name:        "web_search",
+	Description: "Search the web using Serper API",
+	Parameters:  WebSearchToolParams,
+}
+
+var WebSearchTool = openrouter.Tool{
+	Type:     openrouter.ToolTypeFunction,
+	Function: &WebSearchOpenrouterFn,
 }
 
 func WebSearch(params WebSearchParams) (WebSearchResult, ToolError) {

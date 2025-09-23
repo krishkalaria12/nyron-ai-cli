@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/revrost/go-openrouter"
+	"github.com/revrost/go-openrouter/jsonschema"
 )
 
 type GetFileInfoParams struct {
@@ -27,6 +30,30 @@ type GetFileInfoResult struct {
 	Message string
 	Path    string
 	Info    FileInfo
+}
+
+var GetFileInfoToolParams = jsonschema.Definition{
+	Type: jsonschema.Object,
+	Properties: map[string]jsonschema.Definition{
+		"Path": {
+			Type:        jsonschema.String,
+			Description: "Path to the file or folder to get information about",
+		},
+	},
+	Required: []string{
+		"Path",
+	},
+}
+
+var GetFileInfoOpenrouterFn = openrouter.FunctionDefinition{
+	Name:        "get_file_info",
+	Description: "Get detailed information about a file or folder",
+	Parameters:  GetFileInfoToolParams,
+}
+
+var GetFileInfoTool = openrouter.Tool{
+	Type:     openrouter.ToolTypeFunction,
+	Function: &GetFileInfoOpenrouterFn,
 }
 
 func GetFileInfo(params GetFileInfoParams) (GetFileInfoResult, ToolError) {

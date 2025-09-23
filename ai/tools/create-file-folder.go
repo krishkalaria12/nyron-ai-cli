@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/revrost/go-openrouter"
+	"github.com/revrost/go-openrouter/jsonschema"
 )
 
 type CreateParams struct {
@@ -16,6 +19,40 @@ type CreateSuccess struct {
 	Success bool
 	Message string
 	Path    string
+}
+
+var CreateToolParams = jsonschema.Definition{
+	Type: jsonschema.Object,
+	Properties: map[string]jsonschema.Definition{
+		"BasePath": {
+			Type:        jsonschema.String,
+			Description: "Base path to which you need to create the File/Folder",
+		},
+		"TypeOfCreate": {
+			Type:        jsonschema.String,
+			Description: "Type of creation: file or folder, only this 2 is allowed",
+		},
+		"Name": {
+			Type:        jsonschema.String,
+			Description: "Name of the file or folder which is to be created",
+		},
+	},
+	Required: []string{
+		"BasePath",
+		"TypeOfCreate",
+		"Name",
+	},
+}
+
+var OpenrouterFn = openrouter.FunctionDefinition{
+	Name:        "create_file_or_folder",
+	Description: "Create file or folder in the system",
+	Parameters:  CreateToolParams,
+}
+
+var CreateTool = openrouter.Tool{
+	Type:     openrouter.ToolTypeFunction,
+	Function: &OpenrouterFn,
 }
 
 func CreateFileOrFolder(params CreateParams) (CreateSuccess, ToolError) {

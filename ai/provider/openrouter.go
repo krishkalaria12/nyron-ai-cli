@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/krishkalaria12/nyron-ai-cli/ai/tools"
 	"github.com/krishkalaria12/nyron-ai-cli/config"
 	prompts "github.com/krishkalaria12/nyron-ai-cli/config/prompts"
 	openrouter "github.com/revrost/go-openrouter"
@@ -22,6 +23,7 @@ func OpenRouterAPI(prompt string, model string) AIResponseMessage {
 			Messages: []openrouter.ChatCompletionMessage{
 				openrouter.UserMessage(prompts.FinalPrompt(prompt, "openrouter")),
 			},
+			Tools: tools.GetAllTools(),
 		},
 	)
 

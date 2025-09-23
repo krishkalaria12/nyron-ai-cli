@@ -3,12 +3,15 @@ package tools
 import (
 	"fmt"
 	"os"
+
+	"github.com/revrost/go-openrouter"
+	"github.com/revrost/go-openrouter/jsonschema"
 )
 
 type WriteParams struct {
-	file_path string
-	content   string
-	mode      string
+	FilePath string
+	Content  string
+	Mode     string
 }
 
 type WriteSuccess struct {
@@ -17,10 +20,44 @@ type WriteSuccess struct {
 	Path    string
 }
 
+var WriteToolParams = jsonschema.Definition{
+	Type: jsonschema.Object,
+	Properties: map[string]jsonschema.Definition{
+		"FilePath": {
+			Type:        jsonschema.String,
+			Description: "Path to the file to write content to",
+		},
+		"Content": {
+			Type:        jsonschema.String,
+			Description: "Content to write to the file",
+		},
+		"Mode": {
+			Type:        jsonschema.String,
+			Description: "Write mode: 'overwrite' or 'append'",
+		},
+	},
+	Required: []string{
+		"FilePath",
+		"Content",
+		"Mode",
+	},
+}
+
+var WriteOpenrouterFn = openrouter.FunctionDefinition{
+	Name:        "write_content",
+	Description: "Write content to a file with overwrite or append mode",
+	Parameters:  WriteToolParams,
+}
+
+var WriteContentTool = openrouter.Tool{
+	Type:     openrouter.ToolTypeFunction,
+	Function: &WriteOpenrouterFn,
+}
+
 func WriteContent(params WriteParams) (WriteSuccess, ToolError) {
-	switch params.mode {
+	switch params.Mode {
 	case "overwrite":
-		err := os.WriteFile(params.file_path, []byte(params.content), 0644)
+		err := os.WriteFile(params.FilePath, []byte(params.Content), 0644)
 		if err != nil {
 			toolErr := ToolError{
 				Success: false,
@@ -32,13 +69,13 @@ func WriteContent(params WriteParams) (WriteSuccess, ToolError) {
 
 		toolSuc := WriteSuccess{
 			Success: true,
-			Message: fmt.Sprintf("Content '%s' filepath %s", params.mode, params.file_path),
-			Path:    params.file_path,
+			Message: fmt.Sprintf("Content '%s' filepath %s", params.Mode, params.FilePath),
+			Path:    params.FilePath,
 		}
 		return toolSuc, ToolError{}
 
 	case "append":
-		file, err := os.OpenFile(params.file_path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		file, err := os.OpenFile(params.FilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			toolErr := ToolError{
 				Success: false,
@@ -49,7 +86,7 @@ func WriteContent(params WriteParams) (WriteSuccess, ToolError) {
 		}
 		defer file.Close()
 
-		_, err = file.WriteString(params.content)
+		_, err = file.WriteString(params.Content)
 		if err != nil {
 			toolErr := ToolError{
 				Success: false,
@@ -61,16 +98,16 @@ func WriteContent(params WriteParams) (WriteSuccess, ToolError) {
 
 		toolSuc := WriteSuccess{
 			Success: true,
-			Message: fmt.Sprintf("Content '%s' filepath %s", params.mode, params.file_path),
-			Path:    params.file_path,
+			Message: fmt.Sprintf("Content '%s' filepath %s", params.Mode, params.FilePath),
+			Path:    params.FilePath,
 		}
 		return toolSuc, ToolError{}
 
 	default:
 		return WriteSuccess{}, ToolError{
 			Success: false,
-			Message: fmt.Sprintf("Invalid mode: %s", params.mode),
-			Err:     fmt.Errorf("invalid mode: %s", params.mode),
+			Message: fmt.Sprintf("Invalid mode: %s", params.Mode),
+			Err:     fmt.Errorf("invalid mode: %s", params.Mode),
 		}
 	}
 }

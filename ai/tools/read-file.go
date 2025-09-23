@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/revrost/go-openrouter"
+	"github.com/revrost/go-openrouter/jsonschema"
 )
 
 type ReadFileParams struct {
@@ -19,6 +22,38 @@ type ReadFileResult struct {
 	Content    string
 	Truncated  bool
 	TotalLines int
+}
+
+var ReadFileToolParams = jsonschema.Definition{
+	Type: jsonschema.Object,
+	Properties: map[string]jsonschema.Definition{
+		"FilePath": {
+			Type:        jsonschema.String,
+			Description: "Path to the file to read",
+		},
+		"Encoding": {
+			Type:        jsonschema.String,
+			Description: "File encoding (optional)",
+		},
+		"MaxLines": {
+			Type:        jsonschema.Integer,
+			Description: "Maximum number of lines to read (optional)",
+		},
+	},
+	Required: []string{
+		"FilePath",
+	},
+}
+
+var ReadFileOpenrouterFn = openrouter.FunctionDefinition{
+	Name:        "read_file",
+	Description: "Read content from a file with optional line limiting",
+	Parameters:  ReadFileToolParams,
+}
+
+var ReadFileTool = openrouter.Tool{
+	Type:     openrouter.ToolTypeFunction,
+	Function: &ReadFileOpenrouterFn,
 }
 
 func ReadFile(params ReadFileParams) (ReadFileResult, ToolError) {

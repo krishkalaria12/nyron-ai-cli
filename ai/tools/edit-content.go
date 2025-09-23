@@ -5,6 +5,9 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/revrost/go-openrouter"
+	"github.com/revrost/go-openrouter/jsonschema"
 )
 
 type EditParams struct {
@@ -20,6 +23,47 @@ type EditResult struct {
 	Message  string
 	Path     string
 	EditMode string
+}
+
+var EditToolParams = jsonschema.Definition{
+	Type: jsonschema.Object,
+	Properties: map[string]jsonschema.Definition{
+		"FilePath": {
+			Type:        jsonschema.String,
+			Description: "Path to the file to edit",
+		},
+		"EditMode": {
+			Type:        jsonschema.String,
+			Description: "Edit mode: 'replace', 'insert_at_line', 'append_line', 'prepend_line', 'replace_line'",
+		},
+		"SearchText": {
+			Type:        jsonschema.String,
+			Description: "Text to search for (required for 'replace' mode)",
+		},
+		"ReplacementText": {
+			Type:        jsonschema.String,
+			Description: "Text to replace with or insert",
+		},
+		"LineNumber": {
+			Type:        jsonschema.Integer,
+			Description: "Line number (required for 'insert_at_line' and 'replace_line' modes)",
+		},
+	},
+	Required: []string{
+		"FilePath",
+		"EditMode",
+	},
+}
+
+var EditOpenrouterFn = openrouter.FunctionDefinition{
+	Name:        "edit_content",
+	Description: "Edit file content with various editing modes",
+	Parameters:  EditToolParams,
+}
+
+var EditTool = openrouter.Tool{
+	Type:     openrouter.ToolTypeFunction,
+	Function: &EditOpenrouterFn,
 }
 
 func EditFileContent(params EditParams) (EditResult, ToolError) {
