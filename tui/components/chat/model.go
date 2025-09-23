@@ -62,6 +62,13 @@ type Message struct {
 	Rendered   string // Cached markdown rendering
 	IsRendered bool   // Whether markdown processing is complete
 	Thinking   string // AI thinking process (if available)
+	ToolCalls  []ToolCall // Tool calls made during this message
+}
+
+// ToolCall represents a single tool call
+type ToolCall struct {
+	Step    string // The tool call step description
+	Content string // The content/result of the tool call
 }
 
 type ChatModel struct {
@@ -86,6 +93,11 @@ type responseMsg struct {
 	thinking string
 	content  string
 	err      error
+}
+
+type responseToolMsg struct {
+	step string
+	content string
 }
 
 func NewChatModel() ChatModel {
@@ -125,18 +137,37 @@ func (m ChatModel) Init() tea.Cmd {
 
 func getAIResponse(prompt string, selectedModel config.SelectedModel) tea.Cmd {
 	return func() tea.Msg {
+		// done is for overall response
+		// toolchain is for showing the tool call made
+		toolchan := make(chan provider.ToolCallingResponse)
+		done := make(chan bool)
+
 		var response provider.AIResponseMessage
+
 		switch selectedModel.Provider {
 		case "openrouter":
-			response = ai.OpenRouterAPI(prompt, selectedModel.Model)
+			go func() {
+				response = ai.OpenRouterAPI(prompt, selectedModel.Model, toolchan)
+				done <- true
+			}()
 		default:
-			response = ai.OpenRouterAPI(prompt, "gemini-2.5-flash")
+			response = ai.OpenRouterAPI(prompt, "gemini-2.5-flash", toolchan)
 		}
 
-		return responseMsg{
-			thinking: response.Thinking,
-			content:  response.Content,
-			err:      response.Err,
+		for {
+			select {
+			case toolResponse := <-toolchan:
+				return responseToolMsg{
+					step: toolResponse.Step,
+					content: toolResponse.Content,
+				}
+			case <-done:
+				return responseMsg{
+					thinking: response.Thinking,
+					content:  response.Content,
+					err:      response.Err,
+				}
+			}
 		}
 	}
 }
@@ -181,11 +212,12 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showDialog = true
 			return m, m.modelDialog.Init()
 		case key.Matches(msg, m.keys.Up), key.Matches(msg, m.keys.Down), key.Matches(msg, m.keys.PageUp), key.Matches(msg, m.keys.PageDown):
-			if m.focused == focusViewport {
+			switch m.focused {
+			case focusViewport:
 				var vpCmd tea.Cmd
 				m.viewport, vpCmd = m.viewport.Update(msg)
 				cmds = append(cmds, vpCmd)
-			} else if m.focused == focusInput {
+			case focusInput:
 				// Pass navigation keys to the input for cursor movement and scrolling
 				oldInputHeight := m.input.TextArea.Height()
 				var updatedModel tea.Model
@@ -225,7 +257,8 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.spinner.Tick, getAIResponse(userMessage, m.selectedModel))
 			}
 		default:
-			if m.focused == focusInput {
+			switch m.focused {
+			case focusInput:
 				oldInputHeight := m.input.TextArea.Height()
 				var updatedModel tea.Model
 				updatedModel, cmd = m.input.Update(msg)
@@ -237,7 +270,7 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				cmds = append(cmds, cmd)
-			} else if m.focused == focusViewport {
+			case focusViewport:
 				var vpCmd tea.Cmd
 				m.viewport, vpCmd = m.viewport.Update(msg)
 				cmds = append(cmds, vpCmd)
@@ -267,6 +300,30 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, newMsg)
 			cmds = append(cmds, util.RenderMarkdownAsync(msg.content, m.width-4, messageIndex))
 		}
+
+	case responseToolMsg:
+		// Add tool call to the last AI message if it exists, or create a new one
+		if len(m.messages) > 0 && !m.messages[len(m.messages)-1].IsUser {
+			// Add to existing AI message
+			lastMsgIndex := len(m.messages) - 1
+			m.messages[lastMsgIndex].ToolCalls = append(m.messages[lastMsgIndex].ToolCalls, ToolCall{
+				Step:    msg.step,
+				Content: msg.content,
+			})
+		} else {
+			// Create new AI message with tool call
+			newMsg := Message{
+				Content:    "",
+				IsUser:     false,
+				IsRendered: true, // Tool calls don't need markdown rendering
+				ToolCalls: []ToolCall{{
+					Step:    msg.step,
+					Content: msg.content,
+				}},
+			}
+			m.messages = append(m.messages, newMsg)
+		}
+		m.updateViewportContentWithScroll(true)
 
 	case spinner.TickMsg:
 		if m.loading {
@@ -340,9 +397,28 @@ func (m *ChatModel) renderAIMessage(msg Message) string {
 		content += "\n\n"
 	}
 
-	// Add main response content
-	aiContent := aiMessageContentStyle.Width(m.width - aiMessageContentStyle.GetHorizontalFrameSize()).Render(msg.Rendered)
-	content += lipgloss.JoinVertical(lipgloss.Left, aiLabel, aiContent)
+	// Add tool calls if available
+	if len(msg.ToolCalls) > 0 {
+		toolHeader := toolCallHeaderStyle.Render("🔧 Tool Calls:")
+		content += toolHeader + "\n"
+
+		for _, toolCall := range msg.ToolCalls {
+			stepText := toolCallStyle.Render("Step: " + toolCall.Step)
+			contentText := toolCallContentStyle.Width(m.width - toolCallContentStyle.GetHorizontalFrameSize()).Render(toolCall.Content)
+
+			content += stepText + "\n"
+			content += contentText + "\n\n"
+		}
+	}
+
+	// Add main response content if available
+	if msg.Rendered != "" {
+		aiContent := aiMessageContentStyle.Width(m.width - aiMessageContentStyle.GetHorizontalFrameSize()).Render(msg.Rendered)
+		content += lipgloss.JoinVertical(lipgloss.Left, aiLabel, aiContent)
+	} else if len(msg.ToolCalls) > 0 {
+		// If we only have tool calls, still show the AI label
+		content = lipgloss.JoinVertical(lipgloss.Left, aiLabel, content)
+	}
 
 	return content + "\n\n"
 }

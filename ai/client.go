@@ -9,7 +9,7 @@ import (
 type StreamMessage = provider.StreamMessage
 
 // OpenRouterAPI generates a complete response using OpenRouter API
-func OpenRouterAPI(userPrompt string, model string) provider.AIResponseMessage {
+func OpenRouterAPI(userPrompt string, model string, toolchan chan<- provider.ToolCallingResponse) provider.AIResponseMessage {
 	promptPair := prompts.GetPrompts(userPrompt, "openrouter")
-	return provider.OpenRouterAPI(promptPair.SystemPrompt, promptPair.UserPrompt, model)
+	return provider.OpenRouterAPI(promptPair.SystemPrompt, promptPair.UserPrompt, model, toolchan)
 }

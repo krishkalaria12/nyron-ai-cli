@@ -91,4 +91,21 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(primaryColor).
 			Padding(1, 2)
+
+	// Tool calling styles
+	toolCallStyle = lipgloss.NewStyle().
+			Foreground(accentColor).
+			Bold(true).
+			PaddingLeft(2)
+
+	toolCallHeaderStyle = lipgloss.NewStyle().
+				Foreground(accentColor).
+				Bold(true).
+				PaddingLeft(2)
+
+	toolCallContentStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#ffffff")).
+				PaddingLeft(4).
+				Border(lipgloss.Border{Left: "│"}).
+				BorderForeground(accentColor)
 )

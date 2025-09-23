@@ -12,3 +12,8 @@ type AIResponseMessage struct {
 	Content  string
 	Err      error
 }
+
+type ToolCallingResponse struct {
+	Step    string // the tool call it did
+	Content string // the content for the tool call
+}

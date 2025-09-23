@@ -10,7 +10,7 @@ import (
 )
 
 // OpenRouterAPI generates a complete response using OpenRouter API
-func OpenRouterAPI(systemPrompt, userPrompt string, model string) AIResponseMessage {
+func OpenRouterAPI(systemPrompt, userPrompt string, model string, toolchan chan<- ToolCallingResponse) AIResponseMessage {
 	client := openrouter.NewClient(
 		config.Config("OPENROUTER_API_KEY"),
 	)
@@ -52,6 +52,8 @@ func OpenRouterAPI(systemPrompt, userPrompt string, model string) AIResponseMess
 
 	msg := resp.Choices[0].Message
 	for len(msg.ToolCalls) > 0 {
+		msgInput = append(msgInput, msg)
+
 		tool_call_id := msg.ToolCalls[0].ID
 		fn_name := msg.ToolCalls[0].Function.Name
 		fn_arguements := msg.ToolCalls[0].Function.Arguments
@@ -64,6 +66,11 @@ func OpenRouterAPI(systemPrompt, userPrompt string, model string) AIResponseMess
 			},
 			ToolCallID: tool_call_id,
 		})
+
+		toolchan <- ToolCallingResponse{
+			Step:    fn_name,
+			Content: fn_arguements,
+		}
 
 		// demonstrate the tool call in here
 		resp, err := client.CreateChatCompletion(
@@ -88,6 +95,7 @@ func OpenRouterAPI(systemPrompt, userPrompt string, model string) AIResponseMess
 		msg = resp.Choices[0].Message
 	}
 
+	close(toolchan)
 	thinking := ""
 
 	if msg.Reasoning != nil {
