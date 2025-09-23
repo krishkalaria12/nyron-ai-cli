@@ -121,25 +121,6 @@ func ExecuteTool(toolName string, arguements string) string {
 		responseStr, _ := json.Marshal(response)
 		return string(responseStr)
 
-	case "get_file_info":
-		fileInfoPar := GetFileInfoParams{}
-		if err := json.Unmarshal([]byte(arguements), &fileInfoPar); err != nil {
-			response = ToolResponse{
-				Result: nil,
-				Error: ToolError{
-					Success: false,
-					Message: "Unknown tool or invalid parameters",
-					Err:     err,
-				},
-			}
-		} else {
-			result, err := GetFileInfo(fileInfoPar)
-			response = ToolResponse{Result: result, Error: err}
-		}
-
-		responseStr, _ := json.Marshal(response)
-		return string(responseStr)
-
 	case "get_current_directory":
 		result, err := GetCurrentDirectory()
 		response = ToolResponse{Result: result, Error: err}

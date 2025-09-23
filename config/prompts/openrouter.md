@@ -14,6 +14,9 @@ If the current working directory contains a file called CRUSH.md, it will be aut
 
 When you spend time searching for commands to typecheck, lint, build, or test, you should ask the user if it's okay to add those commands to CRUSH.md. Similarly, when learning about code style preferences or important codebase information, ask if it's okay to add that to CRUSH.md so you can remember it for next time.
 
+# Web Search
+I want you to search the web only when it is absolutely necessary and only when you need the context of the last information. For example - what is latest package version of the chalk npm package. Example - what is the today's news
+
 # Core Mandates
 
 - **Conventions:** Rigorously adhere to existing project conventions when reading or modifying code. Analyze surrounding code, tests, and configuration first.

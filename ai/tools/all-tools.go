@@ -10,7 +10,6 @@ func GetAllTools() []openrouter.Tool {
 		ListDirectoryTool,
 		SearchFilesTool,
 		ReadFileTool,
-		GetFileInfoTool,
 		GetCurrentDirectoryTool,
 		WebSearchTool,
 	}

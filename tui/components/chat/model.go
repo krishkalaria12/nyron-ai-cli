@@ -1,6 +1,9 @@
 package chat
 
 import (
+	"encoding/json"
+	"strings"
+
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -309,9 +312,10 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// AI wants to use tools
 			var uiToolCalls []ToolCall
 			for _, call := range assistantMessage.ToolCalls {
+				displayName, displayContent := formatToolCallForDisplay(call.Function.Name, call.Function.Arguments)
 				uiToolCalls = append(uiToolCalls, ToolCall{
-					Step:    call.Function.Name,
-					Content: call.Function.Arguments,
+					Step:    displayName,
+					Content: displayContent,
 				})
 			}
 			// Add a new message to the UI to show what the AI is doing
@@ -391,19 +395,26 @@ func (m *ChatModel) updateViewportContent() {
 
 func (m *ChatModel) updateViewportContentWithScroll(autoScroll bool) {
 	var content string
+	var hasAIMessageInCurrentConversation bool
+
 	for _, msg := range m.messages {
 		if msg.IsUser {
 			userLabel := userMessageStyle.Render("You:")
 			userContent := userMessageContentStyle.Width(m.width - userMessageContentStyle.GetHorizontalFrameSize()).Render(msg.Content)
 			content += userLabel + " " + userContent + "\n\n"
+			hasAIMessageInCurrentConversation = false // Reset for new user message
 		} else if msg.IsRendered {
-			content += m.renderAIMessage(msg)
+			content += m.renderAIMessage(msg, !hasAIMessageInCurrentConversation)
+			hasAIMessageInCurrentConversation = true
 		}
 	}
 	if m.loading {
-		aiLabel := aiMessageStyle.Render("AI:")
+		aiLabel := ""
+		if !hasAIMessageInCurrentConversation {
+			aiLabel = aiMessageStyle.Render("AI:") + " "
+		}
 		thinkingText := thinkingStyle.Render(m.spinner.View() + " Thinking...")
-		content += aiLabel + " " + thinkingText
+		content += aiLabel + thinkingText
 	}
 	m.viewport.SetContent(content)
 	if autoScroll {
@@ -411,43 +422,179 @@ func (m *ChatModel) updateViewportContentWithScroll(autoScroll bool) {
 	}
 }
 
-func (m *ChatModel) renderAIMessage(msg Message) string {
-	aiLabel := aiMessageStyle.Render("AI:")
+// formatToolCallForDisplay converts raw tool call information into user-friendly descriptions
+func formatToolCallForDisplay(toolName, arguments string) (string, string) {
+	var displayName, displayContent string
 
-	var content string
+	// Parse the JSON arguments to extract meaningful information
+	var args map[string]any
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		// If JSON parsing fails, use the tool name as-is
+		return toolName, arguments
+	}
+
+	switch toolName {
+	case "read_file":
+		if filePath, ok := args["FilePath"].(string); ok {
+			displayName = "Reading file"
+			displayContent = filePath
+		} else {
+			displayName = "Reading file"
+			displayContent = "unknown file"
+		}
+
+	case "search_files":
+		if pattern, ok := args["Pattern"].(string); ok {
+			displayName = "Searching for files"
+			displayContent = "pattern: " + pattern
+			if searchPath, ok := args["SearchPath"].(string); ok && searchPath != "" && searchPath != "." {
+				displayContent += " in " + searchPath
+			}
+		} else {
+			displayName = "Searching for files"
+			displayContent = "unknown pattern"
+		}
+
+	case "web_search":
+		if query, ok := args["Query"].(string); ok {
+			displayName = "Searching web"
+			displayContent = "\"" + query + "\""
+		} else {
+			displayName = "Searching web"
+			displayContent = "unknown query"
+		}
+
+	case "create_file_or_folder":
+		basePath, hasBasePath := args["BasePath"].(string)
+		name, hasName := args["Name"].(string)
+		if hasBasePath && hasName {
+			fullPath := basePath + "/" + name
+			if itemType, ok := args["TypeOfCreate"].(string); ok {
+				if itemType == "file" {
+					displayName = "Creating file"
+				} else {
+					displayName = "Creating folder"
+				}
+			} else {
+				displayName = "Creating"
+			}
+			displayContent = fullPath
+		} else {
+			displayName = "Creating item"
+			displayContent = "unknown path"
+		}
+
+	case "edit_content":
+		if filePath, ok := args["FilePath"].(string); ok {
+			displayName = "Editing file"
+			displayContent = filePath
+		} else {
+			displayName = "Editing file"
+			displayContent = "unknown file"
+		}
+
+	case "write_content":
+		if filePath, ok := args["FilePath"].(string); ok {
+			displayName = "Writing to file"
+			displayContent = filePath
+		} else {
+			displayName = "Writing to file"
+			displayContent = "unknown file"
+		}
+
+	case "list_directory":
+		if path, ok := args["Path"].(string); ok {
+			displayName = "Listing directory"
+			if path == "" || path == "." {
+				displayContent = "current directory"
+			} else {
+				displayContent = path
+			}
+		} else {
+			displayName = "Listing directory"
+			displayContent = "current directory"
+		}
+
+	case "get_file_info":
+		if filePath, ok := args["FilePath"].(string); ok {
+			displayName = "Getting file info"
+			displayContent = filePath
+		} else {
+			displayName = "Getting file info"
+			displayContent = "unknown file"
+		}
+
+	case "get_current_directory":
+		displayName = "Getting current directory"
+		displayContent = ""
+
+	default:
+		// For unknown tools, use a more readable format
+		displayName = strings.ReplaceAll(toolName, "_", " ")
+		// Capitalize first letter of each word manually (safer than deprecated strings.Title)
+		words := strings.Fields(displayName)
+		for i, word := range words {
+			if len(word) > 0 {
+				words[i] = strings.ToUpper(word[:1]) + word[1:]
+			}
+		}
+		displayName = strings.Join(words, " ")
+		displayContent = "executing..."
+	}
+
+	return displayName, displayContent
+}
+
+func (m *ChatModel) renderAIMessage(msg Message, showAILabel bool) string {
+	var contentParts []string
 
 	// Add thinking section if available
 	if msg.Thinking != "" {
 		thinkingHeader := thinkingHeaderStyle.Render("🤔 Thinking:")
 		thinkingContent := thinkingStyle.Width(m.width - thinkingStyle.GetHorizontalFrameSize()).Render(msg.Thinking)
-		content = lipgloss.JoinVertical(lipgloss.Left, thinkingHeader, thinkingContent)
-		content += "\n\n"
+		contentParts = append(contentParts, lipgloss.JoinVertical(lipgloss.Left, thinkingHeader, thinkingContent))
 	}
 
 	// Add tool calls if available
 	if len(msg.ToolCalls) > 0 {
 		toolHeader := toolCallHeaderStyle.Render("🔧 Tool Calls:")
-		content += toolHeader + "\n"
+		toolContent := toolHeader + "\n"
 
 		for _, toolCall := range msg.ToolCalls {
-			stepText := toolCallStyle.Render("Step: " + toolCall.Step)
-			contentText := toolCallContentStyle.Width(m.width - toolCallContentStyle.GetHorizontalFrameSize()).Render(toolCall.Content)
+			stepText := toolCallStyle.Render("• " + toolCall.Step)
 
-			content += stepText + "\n"
-			content += contentText + "\n\n"
+			// Only show content if it's not empty
+			if toolCall.Content != "" {
+				contentText := toolCallContentStyle.Width(m.width - toolCallContentStyle.GetHorizontalFrameSize()).Render(toolCall.Content)
+				toolContent += stepText + "\n" + contentText + "\n\n"
+			} else {
+				toolContent += stepText + "\n\n"
+			}
 		}
+		contentParts = append(contentParts, toolContent)
 	}
 
 	// Add main response content if available
 	if msg.Rendered != "" {
 		aiContent := aiMessageContentStyle.Width(m.width - aiMessageContentStyle.GetHorizontalFrameSize()).Render(msg.Rendered)
-		content += lipgloss.JoinVertical(lipgloss.Left, aiLabel, aiContent)
-	} else if len(msg.ToolCalls) > 0 {
-		// If we only have tool calls, still show the AI label
-		content = lipgloss.JoinVertical(lipgloss.Left, aiLabel, content)
+		contentParts = append(contentParts, aiContent)
 	}
 
-	return content + "\n\n"
+	// Join all content parts
+	if len(contentParts) > 0 {
+		allContent := lipgloss.JoinVertical(lipgloss.Left, contentParts...)
+		if showAILabel {
+			aiLabel := aiMessageStyle.Render("AI:")
+			return lipgloss.JoinVertical(lipgloss.Left, aiLabel, allContent) + "\n\n"
+		}
+		return allContent + "\n\n"
+	}
+
+	if showAILabel {
+		aiLabel := aiMessageStyle.Render("AI:")
+		return aiLabel + "\n\n"
+	}
+	return "\n\n"
 }
 
 func (m *ChatModel) updateSpinnerContent() {
