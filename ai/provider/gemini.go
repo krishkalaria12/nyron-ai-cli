@@ -41,7 +41,12 @@ func GeminiAPI(prompt string, model string) AIResponseMessage {
 		context.Background(),
 		model,
 		genai.Text(prompts.FinalPrompt(prompt, "gemini")),
-		nil,
+		&genai.GenerateContentConfig{
+			ThinkingConfig: &genai.ThinkingConfig{
+				IncludeThoughts: true,
+			},
+			// Tools: ,
+		},
 	)
 
 	var res AIResponseMessage
