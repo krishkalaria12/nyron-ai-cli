@@ -8,11 +8,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/krishkalaria12/nyron-ai-cli/ai"
-	"github.com/krishkalaria12/nyron-ai-cli/ai/provider"
+	"github.com/krishkalaria12/nyron-ai-cli/ai/tools"
 	"github.com/krishkalaria12/nyron-ai-cli/config"
+	prompts "github.com/krishkalaria12/nyron-ai-cli/config/prompts"
 	"github.com/krishkalaria12/nyron-ai-cli/tui/components/dialogs/models"
 	editor "github.com/krishkalaria12/nyron-ai-cli/tui/components/editor"
 	"github.com/krishkalaria12/nyron-ai-cli/util"
+	openrouter "github.com/revrost/go-openrouter"
 )
 
 type focusState int
@@ -55,49 +57,48 @@ var keys = keyMap{
 	OpenDialog: key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "choose model")),
 }
 
-// Message represents a chat message
+// Message represents a chat message for UI rendering
 type Message struct {
 	Content    string
 	IsUser     bool
-	Rendered   string // Cached markdown rendering
-	IsRendered bool   // Whether markdown processing is complete
-	Thinking   string // AI thinking process (if available)
+	Rendered   string     // Cached markdown rendering
+	IsRendered bool       // Whether markdown processing is complete
+	Thinking   string     // AI thinking process (if available)
 	ToolCalls  []ToolCall // Tool calls made during this message
 }
 
-// ToolCall represents a single tool call
+// ToolCall represents a single tool call for UI rendering
 type ToolCall struct {
 	Step    string // The tool call step description
 	Content string // The content/result of the tool call
 }
 
 type ChatModel struct {
-	messages      []Message
-	loading       bool
-	viewport      viewport.Model
-	spinner       spinner.Model
-	input         editor.InputModel
-	keys          keyMap
-	focused       focusState
-	help          help.Model
-	width         int
-	height        int
-	err           error
-	selectedModel config.SelectedModel
-	showDialog    bool
-	modelDialog   *models.ModelListComponent
+	messages            []Message                          // For UI rendering
+	conversationHistory []openrouter.ChatCompletionMessage // For API calls
+	loading             bool
+	viewport            viewport.Model
+	spinner             spinner.Model
+	input               editor.InputModel
+	keys                keyMap
+	focused             focusState
+	help                help.Model
+	width               int
+	height              int
+	err                 error
+	selectedModel       config.SelectedModel
+	showDialog          bool
+	modelDialog         *models.ModelListComponent
 }
 
-// Messages
+// --- New Message Types for the event loop ---
 type responseMsg struct {
-	thinking string
-	content  string
+	response openrouter.ChatCompletionResponse
 	err      error
 }
 
-type responseToolMsg struct {
-	step string
-	content string
+type toolResultsMsg struct {
+	results []openrouter.ChatCompletionMessage
 }
 
 func NewChatModel() ChatModel {
@@ -111,17 +112,18 @@ func NewChatModel() ChatModel {
 	vp := viewport.New(80, 20)
 
 	return ChatModel{
-		messages: []Message{},
-		loading:  false,
-		spinner:  s,
-		input:    inputModel,
-		viewport: vp,
-		focused:  focusInput,
-		keys:     keys,
-		help:     help.New(),
+		messages:            []Message{},
+		conversationHistory: []openrouter.ChatCompletionMessage{},
+		loading:             false,
+		spinner:             s,
+		input:               inputModel,
+		viewport:            vp,
+		focused:             focusInput,
+		keys:                keys,
+		help:                help.New(),
 		selectedModel: config.SelectedModel{
-			Provider: "gemini",
-			Model:    "gemini-2.5-flash",
+			Provider: "openrouter",
+			Model:    "google/gemini-2.5-flash",
 		},
 		showDialog: false,
 		modelDialog: func() *models.ModelListComponent {
@@ -135,40 +137,30 @@ func (m ChatModel) Init() tea.Cmd {
 	return m.input.Focus()
 }
 
-func getAIResponse(prompt string, selectedModel config.SelectedModel) tea.Cmd {
+func getAIResponse(history []openrouter.ChatCompletionMessage, selectedModel config.SelectedModel) tea.Cmd {
 	return func() tea.Msg {
-		// done is for overall response
-		// toolchain is for showing the tool call made
-		toolchan := make(chan provider.ToolCallingResponse)
-		done := make(chan bool)
-
-		var response provider.AIResponseMessage
-
-		switch selectedModel.Provider {
-		case "openrouter":
-			go func() {
-				response = ai.OpenRouterAPI(prompt, selectedModel.Model, toolchan)
-				done <- true
-			}()
-		default:
-			response = ai.OpenRouterAPI(prompt, "gemini-2.5-flash", toolchan)
+		modelID := selectedModel.Model
+		if selectedModel.Provider != "openrouter" {
+			modelID = "google/gemini-2.5-flash"
 		}
+		resp, err := ai.OpenRouterAPI(history, modelID)
+		return responseMsg{response: resp, err: err}
+	}
+}
 
-		for {
-			select {
-			case toolResponse := <-toolchan:
-				return responseToolMsg{
-					step: toolResponse.Step,
-					content: toolResponse.Content,
-				}
-			case <-done:
-				return responseMsg{
-					thinking: response.Thinking,
-					content:  response.Content,
-					err:      response.Err,
-				}
-			}
+// executeToolsCmd processes the tool calls requested by the AI.
+func executeToolsCmd(calls []openrouter.ToolCall) tea.Cmd {
+	return func() tea.Msg {
+		var results []openrouter.ChatCompletionMessage
+		for _, call := range calls {
+			toolResult := tools.ExecuteTool(call.Function.Name, call.Function.Arguments)
+			results = append(results, openrouter.ChatCompletionMessage{
+				Role:       openrouter.ChatMessageRoleTool,
+				Content:    openrouter.Content{Text: toolResult},
+				ToolCallID: call.ID,
+			})
 		}
+		return toolResultsMsg{results: results}
 	}
 }
 
@@ -242,9 +234,24 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Enter) && m.focused == focusInput:
 			// Only send message on plain Enter, not Shift+Enter
 			if msg.String() == "enter" && !m.loading && m.input.Value() != "" {
-				userMessage := m.input.Value()
-				m.messages = append(m.messages, Message{Content: userMessage, IsUser: true})
+				userMessageContent := m.input.Value()
+				m.messages = append(m.messages, Message{Content: userMessageContent, IsUser: true})
 				m.input.Reset()
+
+				// If this is a new conversation, add the system prompt first.
+				if len(m.conversationHistory) == 0 {
+					promptPair := prompts.GetPrompts(userMessageContent, "openrouter")
+					m.conversationHistory = append(m.conversationHistory, openrouter.ChatCompletionMessage{
+						Role:    openrouter.ChatMessageRoleSystem,
+						Content: openrouter.Content{Text: promptPair.SystemPrompt},
+					})
+				}
+
+				// Append the user message to the API history
+				m.conversationHistory = append(m.conversationHistory, openrouter.ChatCompletionMessage{
+					Role:    openrouter.ChatMessageRoleUser,
+					Content: openrouter.Content{Text: userMessageContent},
+				})
 
 				// Reset input height to minimum after clearing
 				m.input.TextArea.SetHeight(m.input.MinHeight())
@@ -254,7 +261,7 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.updateViewportContentWithScroll(true)
 				m.focused = focusViewport
 				m.input.Blur()
-				cmds = append(cmds, m.spinner.Tick, getAIResponse(userMessage, m.selectedModel))
+				cmds = append(cmds, m.spinner.Tick, getAIResponse(m.conversationHistory, m.selectedModel))
 			}
 		default:
 			switch m.focused {
@@ -284,46 +291,65 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, vpCmd)
 		}
 
+	// Handling the conversation cycle
+
 	case responseMsg:
 		if msg.err != nil {
 			m.loading = false
 			m.err = msg.err
-		} else {
-			messageIndex := len(m.messages)
-			// Create message with both thinking and content
-			newMsg := Message{
-				Content:    msg.content,
-				IsUser:     false,
-				IsRendered: false,
-				Thinking:   msg.thinking,
-			}
-			m.messages = append(m.messages, newMsg)
-			cmds = append(cmds, util.RenderMarkdownAsync(msg.content, m.width-4, messageIndex))
+			// Clear history on error to start fresh
+			m.conversationHistory = []openrouter.ChatCompletionMessage{}
+			return m, nil
 		}
 
-	case responseToolMsg:
-		// Add tool call to the last AI message if it exists, or create a new one
-		if len(m.messages) > 0 && !m.messages[len(m.messages)-1].IsUser {
-			// Add to existing AI message
-			lastMsgIndex := len(m.messages) - 1
-			m.messages[lastMsgIndex].ToolCalls = append(m.messages[lastMsgIndex].ToolCalls, ToolCall{
-				Step:    msg.step,
-				Content: msg.content,
-			})
-		} else {
-			// Create new AI message with tool call
-			newMsg := Message{
-				Content:    "",
-				IsUser:     false,
-				IsRendered: true, // Tool calls don't need markdown rendering
-				ToolCalls: []ToolCall{{
-					Step:    msg.step,
-					Content: msg.content,
-				}},
+		assistantMessage := msg.response.Choices[0].Message
+		m.conversationHistory = append(m.conversationHistory, assistantMessage)
+
+		if len(assistantMessage.ToolCalls) > 0 {
+			// AI wants to use tools
+			var uiToolCalls []ToolCall
+			for _, call := range assistantMessage.ToolCalls {
+				uiToolCalls = append(uiToolCalls, ToolCall{
+					Step:    call.Function.Name,
+					Content: call.Function.Arguments,
+				})
 			}
-			m.messages = append(m.messages, newMsg)
+			// Add a new message to the UI to show what the AI is doing
+			m.messages = append(m.messages, Message{
+				IsUser:     false,
+				IsRendered: true, // Mark as rendered to show tool call info
+				ToolCalls:  uiToolCalls,
+			})
+			m.updateViewportContentWithScroll(true)
+			// Dispatch a command to execute the tools
+			cmds = append(cmds, executeToolsCmd(assistantMessage.ToolCalls))
+		} else {
+			// This is the final text response
+			messageIndex := len(m.messages)
+			finalContent := assistantMessage.Content.Text
+			thinking := ""
+			if assistantMessage.Reasoning != nil {
+				thinking = *assistantMessage.Reasoning
+			}
+			m.messages = append(m.messages, Message{
+				Content:    finalContent,
+				IsUser:     false,
+				IsRendered: false,
+				Thinking:   thinking,
+			})
+			// Render the final markdown response
+			cmds = append(cmds, util.RenderMarkdownAsync(finalContent, m.width-4, messageIndex))
+			// Conversation is over, clear history for the next prompt
+			m.conversationHistory = []openrouter.ChatCompletionMessage{}
 		}
-		m.updateViewportContentWithScroll(true)
+
+	case toolResultsMsg:
+		// Append tool results to history
+		m.conversationHistory = append(m.conversationHistory, msg.results...)
+
+		// add a UI message here to show the tool's raw output.
+		// For now, we immediately call the AI again with the new context.
+		cmds = append(cmds, getAIResponse(m.conversationHistory, m.selectedModel))
 
 	case spinner.TickMsg:
 		if m.loading {
@@ -333,10 +359,11 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case util.MarkdownRenderedMsg:
+		// This handles the final response rendering
 		if msg.MessageIndex < len(m.messages) {
 			m.messages[msg.MessageIndex].Rendered = msg.Rendered
 			m.messages[msg.MessageIndex].IsRendered = true
-			m.loading = false
+			m.loading = false // Stop loading only after final render
 			m.updateViewportContentWithScroll(true)
 			cmds = append(cmds, util.DelayedFocus())
 		}
