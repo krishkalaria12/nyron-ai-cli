@@ -1,52 +1,173 @@
 package tools
 
-func ExecuteTool(toolName string, parameters interface{}) ToolResponse {
+import (
+	"encoding/json"
+)
+
+func ExecuteTool(toolName string, arguements string) string {
+	var response ToolResponse
 	switch toolName {
 	case "create_file_or_folder":
-		if params, ok := parameters.(CreateParams); ok {
-			result, err := CreateFileOrFolder(params)
-			return ToolResponse{Result: result, Error: err}
+		createPar := CreateParams{}
+		if err := json.Unmarshal([]byte(arguements), &createPar); err != nil {
+			response = ToolResponse{
+				Result: nil,
+				Error: ToolError{
+					Success: false,
+					Message: "Unknown tool or invalid parameters",
+					Err:     err,
+				},
+			}
+		} else {
+			result, err := CreateFileOrFolder(createPar)
+			response = ToolResponse{Result: result, Error: err}
 		}
+
+		responseStr, _ := json.Marshal(response)
+		return string(responseStr)
+
 	case "edit_content":
-		if params, ok := parameters.(EditParams); ok {
-			result, err := EditFileContent(params)
-			return ToolResponse{Result: result, Error: err}
+		editPar := EditParams{}
+		if err := json.Unmarshal([]byte(arguements), &editPar); err != nil {
+			response = ToolResponse{
+				Result: nil,
+				Error: ToolError{
+					Success: false,
+					Message: "Unknown tool or invalid parameters",
+					Err:     err,
+				},
+			}
+		} else {
+			result, err := EditFileContent(editPar)
+			response = ToolResponse{Result: result, Error: err}
 		}
+
+		responseStr, _ := json.Marshal(response)
+		return string(responseStr)
+
 	case "write_content":
-		if params, ok := parameters.(WriteParams); ok {
-			result, err := WriteContent(params)
-			return ToolResponse{Result: result, Error: err}
+		writePar := WriteParams{}
+		if err := json.Unmarshal([]byte(arguements), &writePar); err != nil {
+			response = ToolResponse{
+				Result: nil,
+				Error: ToolError{
+					Success: false,
+					Message: "Unknown tool or invalid parameters",
+					Err:     err,
+				},
+			}
+		} else {
+			result, err := WriteContent(writePar)
+			response = ToolResponse{Result: result, Error: err}
 		}
+
+		responseStr, _ := json.Marshal(response)
+		return string(responseStr)
+
 	case "list_directory":
-		if params, ok := parameters.(ListDirectoryParams); ok {
-			result, err := ListDirectory(params)
-			return ToolResponse{Result: result, Error: err}
+		listPar := ListDirectoryParams{}
+		if err := json.Unmarshal([]byte(arguements), &listPar); err != nil {
+			response = ToolResponse{
+				Result: nil,
+				Error: ToolError{
+					Success: false,
+					Message: "Unknown tool or invalid parameters",
+					Err:     err,
+				},
+			}
+		} else {
+			result, err := ListDirectory(listPar)
+			response = ToolResponse{Result: result, Error: err}
 		}
+
+		responseStr, _ := json.Marshal(response)
+		return string(responseStr)
+
 	case "search_files":
-		if params, ok := parameters.(SearchFilesParams); ok {
-			result, err := SearchFiles(params)
-			return ToolResponse{Result: result, Error: err}
+		searchPar := SearchFilesParams{}
+		if err := json.Unmarshal([]byte(arguements), &searchPar); err != nil {
+			response = ToolResponse{
+				Result: nil,
+				Error: ToolError{
+					Success: false,
+					Message: "Unknown tool or invalid parameters",
+					Err:     err,
+				},
+			}
+		} else {
+			result, err := SearchFiles(searchPar)
+			response = ToolResponse{Result: result, Error: err}
 		}
+
+		responseStr, _ := json.Marshal(response)
+		return string(responseStr)
+
 	case "read_file":
-		if params, ok := parameters.(ReadFileParams); ok {
-			result, err := ReadFile(params)
-			return ToolResponse{Result: result, Error: err}
+		readPar := ReadFileParams{}
+		if err := json.Unmarshal([]byte(arguements), &readPar); err != nil {
+			response = ToolResponse{
+				Result: nil,
+				Error: ToolError{
+					Success: false,
+					Message: "Unknown tool or invalid parameters",
+					Err:     err,
+				},
+			}
+		} else {
+			result, err := ReadFile(readPar)
+			response = ToolResponse{Result: result, Error: err}
 		}
+
+		responseStr, _ := json.Marshal(response)
+		return string(responseStr)
+
 	case "get_file_info":
-		if params, ok := parameters.(GetFileInfoParams); ok {
-			result, err := GetFileInfo(params)
-			return ToolResponse{Result: result, Error: err}
+		fileInfoPar := GetFileInfoParams{}
+		if err := json.Unmarshal([]byte(arguements), &fileInfoPar); err != nil {
+			response = ToolResponse{
+				Result: nil,
+				Error: ToolError{
+					Success: false,
+					Message: "Unknown tool or invalid parameters",
+					Err:     err,
+				},
+			}
+		} else {
+			result, err := GetFileInfo(fileInfoPar)
+			response = ToolResponse{Result: result, Error: err}
 		}
+
+		responseStr, _ := json.Marshal(response)
+		return string(responseStr)
+
 	case "get_current_directory":
 		result, err := GetCurrentDirectory()
-		return ToolResponse{Result: result, Error: err}
+		response = ToolResponse{Result: result, Error: err}
+
+		responseStr, _ := json.Marshal(response)
+		return string(responseStr)
+
 	case "web_search":
-		if params, ok := parameters.(WebSearchParams); ok {
-			result, err := WebSearch(params)
-			return ToolResponse{Result: result, Error: err}
+		webSearchPar := WebSearchParams{}
+		if err := json.Unmarshal([]byte(arguements), &webSearchPar); err != nil {
+			response = ToolResponse{
+				Result: nil,
+				Error: ToolError{
+					Success: false,
+					Message: "Unknown tool or invalid parameters",
+					Err:     err,
+				},
+			}
+		} else {
+			result, err := WebSearch(webSearchPar)
+			response = ToolResponse{Result: result, Error: err}
 		}
+
+		responseStr, _ := json.Marshal(response)
+		return string(responseStr)
 	}
-	return ToolResponse{
+
+	response = ToolResponse{
 		Result: nil,
 		Error: ToolError{
 			Success: false,
@@ -54,4 +175,7 @@ func ExecuteTool(toolName string, parameters interface{}) ToolResponse {
 			Err:     nil,
 		},
 	}
+
+	responseStr, _ := json.Marshal(response)
+	return string(responseStr)
 }

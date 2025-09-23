@@ -6,24 +6,36 @@ import (
 
 	"github.com/krishkalaria12/nyron-ai-cli/ai/tools"
 	"github.com/krishkalaria12/nyron-ai-cli/config"
-	prompts "github.com/krishkalaria12/nyron-ai-cli/config/prompts"
 	openrouter "github.com/revrost/go-openrouter"
 )
 
 // OpenRouterAPI generates a complete response using OpenRouter API
-func OpenRouterAPI(prompt string, model string) AIResponseMessage {
+func OpenRouterAPI(systemPrompt, userPrompt string, model string) AIResponseMessage {
 	client := openrouter.NewClient(
 		config.Config("OPENROUTER_API_KEY"),
 	)
 
+	msgInput := []openrouter.ChatCompletionMessage{
+		{
+			Role: openrouter.ChatMessageRoleSystem,
+			Content: openrouter.Content{
+				Text: systemPrompt,
+			},
+		},
+		{
+			Role: openrouter.ChatMessageRoleUser,
+			Content: openrouter.Content{
+				Text: userPrompt,
+			},
+		},
+	}
+
 	resp, err := client.CreateChatCompletion(
 		context.Background(),
 		openrouter.ChatCompletionRequest{
-			Model: model,
-			Messages: []openrouter.ChatCompletionMessage{
-				openrouter.UserMessage(prompts.FinalPrompt(prompt, "openrouter")),
-			},
-			Tools: tools.GetAllTools(),
+			Model:    model,
+			Messages: msgInput,
+			Tools:    tools.GetAllTools(),
 		},
 	)
 
@@ -38,17 +50,53 @@ func OpenRouterAPI(prompt string, model string) AIResponseMessage {
 		return res
 	}
 
+	msg := resp.Choices[0].Message
+	for len(msg.ToolCalls) > 0 {
+		tool_call_id := msg.ToolCalls[0].ID
+		fn_name := msg.ToolCalls[0].Function.Name
+		fn_arguements := msg.ToolCalls[0].Function.Arguments
+
+		tool_response := tools.ExecuteTool(fn_name, fn_arguements)
+		msgInput = append(msgInput, openrouter.ChatCompletionMessage{
+			Role: openrouter.ChatMessageRoleTool,
+			Content: openrouter.Content{
+				Text: tool_response,
+			},
+			ToolCallID: tool_call_id,
+		})
+
+		// demonstrate the tool call in here
+		resp, err := client.CreateChatCompletion(
+			context.Background(),
+			openrouter.ChatCompletionRequest{
+				Model:    model,
+				Messages: msgInput,
+				Tools:    tools.GetAllTools(),
+			},
+		)
+
+		if err != nil || len(resp.Choices) != 1 {
+			res = AIResponseMessage{
+				Thinking: "",
+				Content:  "",
+				Err:      fmt.Errorf("Tool completion error: err:%v len(choices):%v\n", err, len(resp.Choices)),
+			}
+
+			return res
+		}
+
+		msg = resp.Choices[0].Message
+	}
+
 	thinking := ""
 
-	if len(resp.Choices) > 0 {
-		if resp.Choices[0].Message.Reasoning != nil {
-			thinking = *resp.Choices[0].Message.Reasoning
-		}
+	if msg.Reasoning != nil {
+		thinking = *msg.Reasoning
 	}
 
 	res = AIResponseMessage{
 		Thinking: thinking,
-		Content:  resp.Choices[0].Message.Content.Text,
+		Content:  msg.Content.Text,
 		Err:      nil,
 	}
 

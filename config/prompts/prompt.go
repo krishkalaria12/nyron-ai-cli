@@ -11,9 +11,14 @@ import (
 //go:embed openrouter.md
 var openrouterSysPrompt string
 
-func FinalPrompt(userPrompt string, provider string) string {
+type PromptPair struct {
+	SystemPrompt string
+	UserPrompt   string
+}
+
+func GetPrompts(userPrompt string, provider string) PromptPair {
 	// Template for user prompt
-	userPromptTemplate := `User Prompt: {{.UserPrompt}}`
+	userPromptTemplate := `{{.UserPrompt}}`
 
 	// Parse the user prompt template
 	tmpl, err := template.New("userPrompt").Parse(userPromptTemplate)
@@ -36,11 +41,17 @@ func FinalPrompt(userPrompt string, provider string) string {
 
 	formattedUserPrompt := userPromptBuffer.String()
 
-	// Combine system prompt with user prompt based on provider
+	// Return separate system and user prompts based on provider
 	switch provider {
 	case "openrouter":
-		return openrouterSysPrompt + "\n\n" + formattedUserPrompt
+		return PromptPair{
+			SystemPrompt: openrouterSysPrompt,
+			UserPrompt:   formattedUserPrompt,
+		}
 	default:
-		return formattedUserPrompt // fallback to just user prompt
+		return PromptPair{
+			SystemPrompt: "",
+			UserPrompt:   formattedUserPrompt,
+		}
 	}
 }
